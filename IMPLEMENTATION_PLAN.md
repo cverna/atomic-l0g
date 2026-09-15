@@ -506,8 +506,22 @@ unexplained empty result.
   backfill records collected before it existed.
 - `sync` prints store and `.git` size, so growth is visible per run.
 
-→ 6 feeds, 134 blog items, idempotent at `new 0`. 80 items flagged security,
-from `security` / `Security` labels on Flatcar advisories.
+**Progress — 2b done (CLI vocabulary, storage hidden):**
+- `al0g stats` -- per-project counts of new, active, comments and releases.
+  NEW (created in window) and ACTIVE (updated in window) are kept apart: the
+  difference between a project generating work and one arguing about old work.
+- `al0g releases` -- release timeline with a per-project cadence footer.
+- `list` gains `--state merged|open|closed` and `--security`.
+- Read commands now guarantee their own index freshness: if the index is
+  missing or older than the newest JSONL they rebuild it, building to a private
+  path and swapping in with `os.replace`. Agents parallelise tool calls, so
+  two concurrent reads must not clash on a rebuild.
+- `prompts/weekly-digest.md` drives a digest through the CLI alone. The
+  interface principle: an agent interacts with the CLI (and later MCP), never
+  with the storage. If a prompt needs a filter the CLI lacks, add a command --
+  do not expose the schema.
+
+→ 5 parallel cold-start reads all exit 0, one rebuild, no clash.
 
 **Remaining in Phase 2:** `structured/*` (Flatcar release components,
 Bottlerocket CHANGELOG, Amazon Linux HTML notes) and `gitlab.py`.

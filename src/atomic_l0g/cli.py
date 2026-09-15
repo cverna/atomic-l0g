@@ -6,6 +6,7 @@ over this surface rather than a rewrite.
 
 import json as jsonlib
 import logging
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -75,17 +76,80 @@ def _load(sources: Optional[Path]) -> Registry:
         raise typer.Exit(code=2) from exc
 
 
-def _connect(settings: Settings) -> sqlite3.Connection:
-    if not settings.db_path.is_file():
-        typer.secho(
-            f"no index at {settings.db_path}; run `al0g db build` first",
-            fg=typer.colors.RED,
-            err=True,
+#: Derived, not stored. Matches an item's labels against the registry's
+#: security_labels table, seeded when the index is built. Storing the flag on
+#: the record would mean it could never backfill.
+SECURITY_EXPR = (
+    "EXISTS (SELECT 1 FROM json_each(COALESCE(i.labels, '[]')) AS j "
+    "JOIN security_labels s ON lower(j.value) = lower(s.label))"
+)
+
+
+def _ensure_index(settings: Settings) -> None:
+    """Guarantee the index is at least as new as the JSONL store.
+
+    The index is derived and gitignored, so it can be absent on a fresh
+    checkout or stale after a sync run with ``--no-index``.  Read commands
+    repair it themselves rather than making the caller know it exists.
+
+    Builds to a private path and swaps it in with ``os.replace``.  Agents
+    parallelise tool calls, so two reads can arrive at once: staging means a
+    reader never sees a half-built index and two builders cannot clash.
+    """
+    newest = max(
+        (path.stat().st_mtime for path in settings.normalized_dir.glob("*.jsonl")),
+        default=0.0,
+    )
+    if settings.db_path.is_file() and settings.db_path.stat().st_mtime >= newest:
+        return
+
+    try:
+        security_labels = load_registry(None).security_labels
+    except (FileNotFoundError, ValueError):
+        security_labels = []
+
+    staging = settings.db_path.with_name(
+        f"{settings.db_path.name}.{os.getpid()}.tmp"
+    )
+    try:
+        counts = db_store.build(
+            staging, JsonlStore(settings.normalized_dir), security_labels
         )
-        raise typer.Exit(code=2)
+        os.replace(staging, settings.db_path)
+    except sqlite3.OperationalError:
+        # Another process is rebuilding, or the path is not writable.  Fall
+        # back to whatever index exists rather than failing the read.
+        staging.unlink(missing_ok=True)
+        if settings.db_path.is_file():
+            return
+        raise
+
+    typer.secho(
+        f"index rebuilt: {counts['items']} items, {counts['comments']} comments, "
+        f"{counts['releases']} releases",
+        fg=typer.colors.BLUE,
+        err=True,
+    )
+
+
+def _connect(settings: Settings) -> sqlite3.Connection:
+    _ensure_index(settings)
     connection = sqlite3.connect(settings.db_path)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def _window_start(window: Optional[str], default: str) -> str:
+    """Resolve a window string, exiting cleanly if it is malformed."""
+    try:
+        return collector_base.window_start(window or default)
+    except ValueError as exc:
+        typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from exc
+
+
+def _in_clause(column: str, values: list[str]) -> str:
+    return f"{column} IN ({','.join('?' * len(values))})"
 
 
 def _dir_size(path: Path) -> int:
@@ -306,6 +370,12 @@ def db_build(sources: Optional[Path] = _sources_opt()) -> None:
 def list_items(
     distro: Optional[list[str]] = typer.Option(None, "--distro", "-d", help="Filter by project."),
     kind: Optional[list[str]] = typer.Option(None, "--kind", "-k", help="Filter by item kind."),
+    state: Optional[list[str]] = typer.Option(
+        None, "--state", "-s", help="Filter by state: open, closed, merged."
+    ),
+    security: bool = typer.Option(
+        False, "--security", help="Only security-labelled items."
+    ),
     window: Optional[str] = typer.Option(None, "--since", help="Only items active within, e.g. 7d."),
     limit: int = typer.Option(50, "--limit", "-n", help="Maximum rows."),
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
@@ -314,28 +384,28 @@ def list_items(
     settings = Settings()
     connection = _connect(settings)
 
-    where = ["item_kind IS NOT NULL"]
+    where = ["1 = 1"]
     params: list[object] = []
 
     if distro:
-        where.append(f"distro IN ({','.join('?' * len(distro))})")
+        where.append(_in_clause("i.distro", distro))
         params.extend(distro)
     if kind:
-        where.append(f"item_kind IN ({','.join('?' * len(kind))})")
+        where.append(_in_clause("i.item_kind", kind))
         params.extend(kind)
+    if state:
+        where.append(_in_clause("i.state", state))
+        params.extend(state)
+    if security:
+        where.append(SECURITY_EXPR)
     if window:
-        try:
-            since = collector_base.window_start(window)
-        except ValueError as exc:
-            typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=2) from exc
-        where.append("COALESCE(updated_at, created_at) >= ?")
-        params.append(since)
+        where.append("COALESCE(i.updated_at, i.created_at) >= ?")
+        params.append(_window_start(window, settings.default_window))
 
     sql = f"""
-        SELECT id, distro, item_kind, title, author, state, url,
-               COALESCE(updated_at, created_at) AS activity
-        FROM items
+        SELECT i.id, i.distro, i.item_kind, i.title, i.author, i.state, i.url,
+               COALESCE(i.updated_at, i.created_at) AS activity
+        FROM items i
         WHERE {' AND '.join(where)}
         ORDER BY activity DESC
         LIMIT ?
@@ -358,6 +428,202 @@ def list_items(
         typer.echo(
             f"{activity:<11} {row['distro']:<22} {row['item_kind']:<8} {title}"
         )
+
+
+@app.command()
+def stats(
+    window: Optional[str] = typer.Option(None, "--since", help="Activity window, default 7d."),
+    distro: Optional[list[str]] = typer.Option(None, "--distro", "-d", help="Filter by project."),
+    kind: Optional[list[str]] = typer.Option(None, "--kind", "-k", help="Filter by item kind."),
+    security: bool = typer.Option(False, "--security", help="Only security-labelled items."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Per-project counts over a window: new, active, comments and releases.
+
+    NEW counts items created in the window; ACTIVE counts items updated in it.
+    Keeping them apart is the difference between "this project is generating
+    work" and "this project is still arguing about old work".
+    """
+    settings = Settings()
+    connection = _connect(settings)
+
+    since = _window_start(window, settings.default_window)
+
+    where = ["1 = 1"]
+    filters: list[object] = []
+    if distro:
+        where.append(_in_clause("i.distro", distro))
+        filters.extend(distro)
+    if kind:
+        where.append(_in_clause("i.item_kind", kind))
+        filters.extend(kind)
+    if security:
+        where.append(SECURITY_EXPR)
+    clause = " AND ".join(where)
+
+    totals: dict[str, dict[str, object]] = {}
+
+    def bucket(name: str) -> dict[str, object]:
+        return totals.setdefault(
+            name,
+            {"distro": name, "new": 0, "active": 0, "comments": 0, "releases": 0},
+        )
+
+    items_sql = f"""
+        SELECT i.distro,
+               SUM(CASE WHEN i.created_at >= ? THEN 1 ELSE 0 END) AS new_items,
+               SUM(CASE WHEN COALESCE(i.updated_at, i.created_at) >= ? THEN 1 ELSE 0 END)
+                   AS active_items
+        FROM items i
+        WHERE {clause}
+        GROUP BY i.distro
+    """
+    for row in connection.execute(items_sql, [since, since, *filters]):
+        entry = bucket(row["distro"])
+        entry["new"] = row["new_items"] or 0
+        entry["active"] = row["active_items"] or 0
+
+    comments_sql = f"""
+        SELECT i.distro, COUNT(*) AS n
+        FROM comments c
+        JOIN items i ON i.id = c.parent_id
+        WHERE c.created_at >= ? AND {clause}
+        GROUP BY i.distro
+    """
+    for row in connection.execute(comments_sql, [since, *filters]):
+        bucket(row["distro"])["comments"] = row["n"]
+
+    # Releases carry no labels, so security cannot apply to them; and a
+    # --kind filter that excludes releases should exclude them here too.
+    if (not kind or "release" in kind) and not security:
+        release_where = ["r.release_date >= ?"]
+        release_params: list[object] = [since[:10]]
+        if distro:
+            release_where.append(_in_clause("r.distro", distro))
+            release_params.extend(distro)
+        releases_sql = (
+            "SELECT r.distro, COUNT(*) AS n FROM releases r "
+            f"WHERE {' AND '.join(release_where)} GROUP BY r.distro"
+        )
+        for row in connection.execute(releases_sql, release_params):
+            bucket(row["distro"])["releases"] = row["n"]
+
+    ordered = sorted(
+        totals.values(),
+        key=lambda entry: (-entry["active"], -entry["releases"], entry["distro"]),
+    )
+
+    if as_json:
+        typer.echo(
+            jsonlib.dumps(
+                {"since": since, "window": window or settings.default_window,
+                 "projects": ordered},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    if not ordered:
+        typer.secho(f"nothing active since {since}", fg=typer.colors.YELLOW)
+        return
+
+    typer.secho(f"window: {window or settings.default_window} (since {since})\n", fg=typer.colors.BLUE)
+    typer.secho(f"{'DISTRO':<24} {'NEW':>5} {'ACTIVE':>7} {'CMTS':>6} {'RELS':>6}", bold=True)
+    for entry in ordered:
+        typer.echo(
+            f"{entry['distro']:<24} {entry['new']:>5} {entry['active']:>7} "
+            f"{entry['comments']:>6} {entry['releases']:>6}"
+        )
+
+    typer.echo()
+    typer.secho(
+        f"{len(ordered)} projects | new {sum(e['new'] for e in ordered)} | "
+        f"active {sum(e['active'] for e in ordered)} | "
+        f"comments {sum(e['comments'] for e in ordered)} | "
+        f"releases {sum(e['releases'] for e in ordered)}",
+        bold=True,
+    )
+
+
+@app.command()
+def releases(
+    distro: Optional[list[str]] = typer.Option(None, "--distro", "-d", help="Filter by project."),
+    window: Optional[str] = typer.Option(None, "--since", help="Window, default 90d."),
+    channel: Optional[str] = typer.Option(
+        None, "--channel", help="Filter by channel, e.g. stable, prerelease."
+    ),
+    limit: int = typer.Option(40, "--limit", "-n", help="Maximum rows."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Release timeline, newest first, with a per-project cadence footer."""
+    settings = Settings()
+    connection = _connect(settings)
+
+    since = _window_start(window, "90d")[:10]
+
+    where = ["r.release_date >= ?"]
+    params: list[object] = [since]
+    if distro:
+        where.append(_in_clause("r.distro", distro))
+        params.extend(distro)
+    if channel:
+        where.append("r.channel = ?")
+        params.append(channel)
+    clause = " AND ".join(where)
+
+    rows = [
+        dict(row)
+        for row in connection.execute(
+            f"""
+            SELECT r.distro, r.version, r.channel, r.release_date, r.url
+            FROM releases r
+            WHERE {clause}
+            ORDER BY r.release_date DESC, r.version DESC
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+    ]
+    cadence = [
+        dict(row)
+        for row in connection.execute(
+            f"""
+            SELECT r.distro, COUNT(*) AS n
+            FROM releases r
+            WHERE {clause}
+            GROUP BY r.distro
+            ORDER BY n DESC
+            """,
+            params,
+        )
+    ]
+
+    if as_json:
+        typer.echo(
+            jsonlib.dumps(
+                {"since": since, "releases": rows, "cadence": cadence},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    if not rows:
+        typer.secho(f"no releases since {since}", fg=typer.colors.YELLOW)
+        return
+
+    typer.secho(f"{'DATE':<12} {'DISTRO':<24} {'CHANNEL':<12} VERSION", bold=True)
+    for row in rows:
+        typer.echo(
+            f"{row['release_date'] or '?':<12} {row['distro']:<24} "
+            f"{row['channel'] or '-':<12} {row['version']}"
+        )
+
+    typer.echo()
+    typer.secho(f"releases since {since}, by project:", bold=True)
+    for row in cadence:
+        typer.echo(f"  {row['distro']:<26} {row['n']}")
 
 
 @app.command()
@@ -480,35 +746,25 @@ def top(
     settings = Settings()
     connection = _connect(settings)
 
+    since = _window_start(window, settings.default_window)
     window = window or settings.default_window
-    try:
-        since = collector_base.window_start(window)
-    except ValueError as exc:
-        typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=2) from exc
 
     where = ["COALESCE(i.updated_at, i.created_at) >= ?"]
     filters: list[object] = [since]
 
     if distro:
-        where.append(f"i.distro IN ({','.join('?' * len(distro))})")
+        where.append(_in_clause("i.distro", distro))
         filters.extend(distro)
     if kind:
-        where.append(f"i.item_kind IN ({','.join('?' * len(kind))})")
+        where.append(_in_clause("i.item_kind", kind))
         filters.extend(kind)
     if security:
-        where.append(
-            "EXISTS (SELECT 1 FROM json_each(COALESCE(i.labels, '[]')) AS j "
-            "JOIN security_labels s ON lower(j.value) = lower(s.label))"
-        )
+        where.append(SECURITY_EXPR)
 
     sql = f"""
         SELECT i.id, i.distro, i.item_kind, i.title, i.url, i.state,
                json_extract(i.data, '$.signal.reactions') AS reactions,
-               EXISTS (
-                   SELECT 1 FROM json_each(COALESCE(i.labels, '[]')) AS j
-                   JOIN security_labels s ON lower(j.value) = lower(s.label)
-               ) AS is_security,
+               {SECURITY_EXPR} AS is_security,
                (
                    SELECT COUNT(*) FROM comments c
                    WHERE c.parent_id = i.id AND c.created_at >= ?

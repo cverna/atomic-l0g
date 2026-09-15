@@ -41,14 +41,26 @@ Then:
 al0g sources validate              # lint the registry
 al0g sources list                  # list watched projects
 al0g sync --distro flatcar         # collect repos and feeds
-al0g list --since 7d               # read from the index
+al0g stats --since 7d              # counts by project
 al0g top --since 7d                # rank by recent discussion activity
+al0g releases --since 90d          # release timeline + cadence
+al0g list --kind pr --state merged # what merged, by kind and state
 al0g search sysext                 # full-text search
 al0g fetch <id> --diff             # reach past the store on demand
 ```
 
+Read commands repair the index themselves if it is missing or stale, so there
+is no build step to remember.
+
 Verify end to end by running `al0g sync --distro flatcar` twice: the second run
 must report `new 0`.
+
+## Prompts
+
+`prompts/weekly-digest.md` drives an agent through the weekly cross-ecosystem
+digest using only the CLI. It doubles as the specification for the interface:
+if a prompt needs something the commands cannot express, that is a missing
+command, not a reason to read the data files.
 
 ## Configuration
 
