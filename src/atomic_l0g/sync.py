@@ -82,6 +82,8 @@ class SyncReport:
     outcomes: list[TargetOutcome] = field(default_factory=list)
     stopped_early: str | None = None
     missing_secrets: list[str] = field(default_factory=list)
+    #: Targets where an explicit --since was ignored because a cursor existed.
+    window_overridden: int = 0
 
     @property
     def stats(self) -> WriteStats:
@@ -143,14 +145,23 @@ def sync(
     distros: list[str] | None = None,
     tier: str | None = None,
     window: str | None = None,
+    backfill: str | None = None,
     with_comments: bool = True,
 ) -> SyncReport:
-    """Collect every selected target into the store."""
+    """Collect every selected target into the store.
+
+    ``window`` applies only to targets that have never been collected; after
+    that the cursor is authoritative, so an ordinary run stays incremental.
+    ``backfill`` overrides the cursor for every selected target, which is the
+    only way to reach further back than the store already goes.
+    """
+    requested_window = window
     window = window or settings.default_window
     observed = utcnow()
     since = base.window_start(window)
+    backfill_since = base.window_start(backfill) if backfill else None
 
-    report = SyncReport(observed=observed, window=window, since=since)
+    report = SyncReport(observed=observed, window=backfill or window, since=since)
     store = JsonlStore(settings.normalized_dir)
     secrets = Secrets()
 
@@ -213,13 +224,25 @@ def sync(
                     if github is None:
                         outcome.skipped = "no credentials"
                         continue
+
+                    cursor_since = cursor.get("last_sync")
+                    if backfill_since:
+                        effective_since = backfill_since
+                    else:
+                        effective_since = cursor_since or since
+                        # An explicit --since that the cursor then overrides is
+                        # worth saying out loud: silently collecting nothing is
+                        # the kind of thing that reads as "no activity".
+                        if cursor_since and requested_window:
+                            report.window_overridden += 1
+
                     result = collect_repo(
                         github,
                         registry,
                         target.key,
                         target.distro,
                         target.tier,
-                        cursor.get("last_sync") or since,
+                        effective_since,
                         cursor,
                         observed,
                         with_comments=with_comments,
@@ -240,7 +263,7 @@ def sync(
 
             # The cursor advances only after the records are safely written.
             cursor.set("last_sync", observed)
-            cursor.set("last_window", window)
+            cursor.set("last_window", backfill or window)
             for key, value in result.cursor.items():
                 cursor.set(key, value)
             cursor.save()

@@ -371,6 +371,14 @@ def _render_report(report: SyncReport) -> None:
 
     if report.stopped_early:
         typer.secho(f"stopped early: {report.stopped_early}", fg=typer.colors.YELLOW)
+    if report.window_overridden:
+        typer.secho(
+            f"note: --since had no effect on {report.window_overridden} target(s) "
+            "that were already collected -- the cursor is authoritative, so an "
+            "ordinary run stays incremental. Use --backfill to reach further back.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
     if report.missing_secrets:
         for message in report.missing_secrets:
             typer.secho(f"error: {message}", fg=typer.colors.RED, err=True)
@@ -385,7 +393,13 @@ def sync(
         None, "--tier", help="Only repositories at this tier (core|watch|release-only)."
     ),
     window: Optional[str] = typer.Option(
-        None, "--since", help="Collection window, e.g. 24h, 7d, 4w, 90d."
+        None, "--since", help="Window for targets not yet collected, e.g. 24h, 7d, 90d."
+    ),
+    backfill: Optional[str] = typer.Option(
+        None,
+        "--backfill",
+        help="Ignore cursors and collect this window again. The only way to reach "
+        "further back than the store already goes.",
     ),
     comments: bool = typer.Option(
         True, "--comments/--no-comments", help="Collect comments for core-tier repositories."
@@ -415,6 +429,7 @@ def sync(
             distros=distro,
             tier=tier,
             window=window,
+            backfill=backfill,
             with_comments=comments,
         )
     except ValueError as exc:
