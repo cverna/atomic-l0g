@@ -5,6 +5,7 @@ over this surface rather than a rewrite.
 """
 
 import json as jsonlib
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -15,7 +16,7 @@ import typer
 from atomic_l0g import __version__
 from atomic_l0g.collectors import base as collector_base
 from atomic_l0g.collectors.github import parse_item_id
-from atomic_l0g.http import github_client
+from atomic_l0g.http import github_client, request
 from atomic_l0g.registry import (
     Registry,
     default_sources_dir,
@@ -39,6 +40,19 @@ sources_app = typer.Typer(
 db_app = typer.Typer(no_args_is_help=True, help="Build and query the SQLite index.")
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
+
+
+@app.callback()
+def main(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show retry and isolation warnings."
+    ),
+) -> None:
+    """Keep retry and isolation warnings visible without drowning in HTTP noise."""
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s", force=True)
+    logging.getLogger("atomic_l0g").setLevel(logging.DEBUG if verbose else logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def _sources_opt() -> typer.Option:
@@ -147,11 +161,16 @@ def _render_report(report: SyncReport) -> None:
             typer.secho(f"  skip  {outcome.repo:<40} {outcome.skipped}", fg=typer.colors.YELLOW)
         else:
             stats = outcome.stats
-            typer.echo(
-                f"  ok    {outcome.repo:<40} [{outcome.tier:<12}] "
+            marker = "  ok  " if not outcome.notes else "  part"
+            colour = typer.colors.GREEN if not outcome.notes else typer.colors.YELLOW
+            typer.secho(
+                f"{marker}  {outcome.repo:<40} [{outcome.tier:<12}] "
                 f"new {stats.new:>4}  revised {stats.revised:>3}  "
-                f"unchanged {stats.unchanged:>4}"
+                f"unchanged {stats.unchanged:>4}",
+                fg=colour,
             )
+            for note in outcome.notes:
+                typer.secho(f"          {note}", fg=typer.colors.YELLOW)
 
     stats = report.stats
     typer.echo()
@@ -367,7 +386,8 @@ def fetch(
 
     with client:
         if diff:
-            response = client.get(
+            response = request(
+                client,
                 f"/repos/{repo}/pulls/{number}",
                 headers={"Accept": "application/vnd.github.diff"},
             )
@@ -378,7 +398,9 @@ def fetch(
             params = {}
             if window:
                 params["since"] = collector_base.window_start(window)
-            response = client.get(f"/repos/{repo}/issues/{number}/comments", params=params)
+            response = request(
+                client, f"/repos/{repo}/issues/{number}/comments", params=params
+            )
             response.raise_for_status()
             for comment in response.json():
                 author = (comment.get("user") or {}).get("login", "?")

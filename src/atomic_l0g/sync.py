@@ -37,6 +37,7 @@ class TargetOutcome:
     repo: str
     tier: str
     stats: WriteStats = field(default_factory=WriteStats)
+    notes: list[str] = field(default_factory=list)
     error: str | None = None
     skipped: str | None = None
 
@@ -166,6 +167,7 @@ def sync(
             outcome.stats = store.write(
                 [*result.items, *result.comments, *result.releases], observed
             )
+            outcome.notes = result.notes
 
             # The cursor advances only after the records are safely written.
             cursor.set("last_sync", observed)

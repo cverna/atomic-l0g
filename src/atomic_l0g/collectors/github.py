@@ -36,6 +36,11 @@ _MAX_ISSUE_PAGES = 5
 _MAX_PULL_PAGES = 5
 _MAX_COMMENT_PAGES = 3
 
+#: Releases carry full release-note bodies, so 100 per page is a heavy response.
+#: On a repository with large notes GitHub returns 504 for later pages at
+#: ``per_page=100`` while serving ``per_page=50`` fine, so ask for less.
+RELEASE_PAGE_SIZE = 50
+
 
 def parse_item_id(item_id: str) -> tuple[str, str, str, str]:
     """Split ``provider:owner/repo:kind:number`` into its parts."""
@@ -45,6 +50,21 @@ def parse_item_id(item_id: str) -> tuple[str, str, str, str]:
             f"malformed item id {item_id!r}; expected provider:owner/repo:kind:number"
         )
     return parts[0], parts[1], parts[2], parts[3]
+
+
+def _phase(label: str, notes: list[str], work: Any) -> None:
+    """Run one collection phase; a transport failure is noted, never fatal.
+
+    A repository is collected in phases, and a failure in one phase must not
+    discard the others.  Without this, a single 504 on the releases endpoint
+    loses that repository's issues, pull requests and comments too.
+    """
+    try:
+        work()
+    except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+        message = f"{label}: {type(exc).__name__}: {exc}"
+        notes.append(message)
+        log.warning("%s", message)
 
 
 def _labels(raw: dict[str, Any]) -> list[str]:
@@ -165,78 +185,101 @@ def collect_repo(
     level = TIER_ORDER.get(tier, 1)
 
     # --- releases: every tier ---
-    for raw in paginate(
-        client, f"/repos/{repo}/releases", max_pages=_MAX_RELEASE_PAGES
-    ):
-        if is_bot((raw.get("author") or {}).get("login"), patterns):
-            continue
-        release = _release(repo, distro, raw, observed)
-        if release is not None:
-            result.releases.append(release)
+    # Bot filtering is deliberately NOT applied here.  Who published a release
+    # is irrelevant -- `github-actions[bot]` publishes most of Universal Blue's
+    # releases, and dropping them would silently lose the entire release stream.
+    def collect_releases() -> None:
+        for raw in paginate(
+            client,
+            f"/repos/{repo}/releases",
+            per_page=RELEASE_PAGE_SIZE,
+            max_pages=_MAX_RELEASE_PAGES,
+        ):
+            release = _release(repo, distro, raw, observed)
+            if release is not None:
+                result.releases.append(release)
+
+    _phase("releases", result.notes, collect_releases)
 
     if level < 1:
         return result
 
+    targets: list[tuple[Item, int, bool]] = []
+
     # --- issues ---
     # The issues endpoint also returns pull requests; those are filtered out
     # here and collected from /pulls instead, which carries merged_at.
-    targets: list[tuple[Item, int, bool]] = []
-    for raw in paginate(
-        client,
-        f"/repos/{repo}/issues",
-        {"state": "all", "sort": "updated", "direction": "desc", "since": since},
-        max_pages=_MAX_ISSUE_PAGES,
-    ):
-        if "pull_request" in raw:
-            continue
-        if is_bot((raw.get("user") or {}).get("login"), patterns):
-            continue
-        item = _issue(repo, distro, raw, observed)
-        result.items.append(item)
-        targets.append((item, raw["number"], False))
+    def collect_issues() -> None:
+        for raw in paginate(
+            client,
+            f"/repos/{repo}/issues",
+            {"state": "all", "sort": "updated", "direction": "desc", "since": since},
+            max_pages=_MAX_ISSUE_PAGES,
+        ):
+            if "pull_request" in raw:
+                continue
+            if is_bot((raw.get("user") or {}).get("login"), patterns):
+                continue
+            item = _issue(repo, distro, raw, observed)
+            result.items.append(item)
+            targets.append((item, raw["number"], False))
+
+    _phase("issues", result.notes, collect_issues)
 
     # --- pull requests ---
     # /pulls has no `since` parameter, so rely on the descending updated_at
     # ordering and stop at the first record older than the window.
-    for raw in paginate(
-        client,
-        f"/repos/{repo}/pulls",
-        {"state": "all", "sort": "updated", "direction": "desc"},
-        stop=lambda record: (record.get("updated_at") or "") < since,
-        max_pages=_MAX_PULL_PAGES,
-    ):
-        if is_bot((raw.get("user") or {}).get("login"), patterns):
-            continue
-        item = _pull(repo, distro, raw, observed)
-        result.items.append(item)
-        targets.append((item, raw["number"], True))
+    def collect_pulls() -> None:
+        for raw in paginate(
+            client,
+            f"/repos/{repo}/pulls",
+            {"state": "all", "sort": "updated", "direction": "desc"},
+            stop=lambda record: (record.get("updated_at") or "") < since,
+            max_pages=_MAX_PULL_PAGES,
+        ):
+            if is_bot((raw.get("user") or {}).get("login"), patterns):
+                continue
+            item = _pull(repo, distro, raw, observed)
+            result.items.append(item)
+            targets.append((item, raw["number"], True))
+
+    _phase("pull requests", result.notes, collect_pulls)
 
     # --- comments: core tier only ---
     if level < 2 or not with_comments:
         return result
 
+    # One failing comment fetch must not cost the rest of the repository.
     for item, number, is_pull in targets:
-        for raw in paginate(
-            client,
-            f"/repos/{repo}/issues/{number}/comments",
-            {"since": since},
-            max_pages=_MAX_COMMENT_PAGES,
-        ):
-            if is_bot((raw.get("user") or {}).get("login"), patterns):
-                continue
-            result.comments.append(_comment(repo, item.id, raw, observed, review=False))
-
-        if is_pull:
+        def collect_issue_comments(item: Item = item, number: int = number) -> None:
             for raw in paginate(
                 client,
-                f"/repos/{repo}/pulls/{number}/comments",
+                f"/repos/{repo}/issues/{number}/comments",
                 {"since": since},
                 max_pages=_MAX_COMMENT_PAGES,
             ):
                 if is_bot((raw.get("user") or {}).get("login"), patterns):
                     continue
                 result.comments.append(
-                    _comment(repo, item.id, raw, observed, review=True)
+                    _comment(repo, item.id, raw, observed, review=False)
                 )
+
+        _phase(f"comments on #{number}", result.notes, collect_issue_comments)
+
+        if is_pull:
+            def collect_review_comments(item: Item = item, number: int = number) -> None:
+                for raw in paginate(
+                    client,
+                    f"/repos/{repo}/pulls/{number}/comments",
+                    {"since": since},
+                    max_pages=_MAX_COMMENT_PAGES,
+                ):
+                    if is_bot((raw.get("user") or {}).get("login"), patterns):
+                        continue
+                    result.comments.append(
+                        _comment(repo, item.id, raw, observed, review=True)
+                    )
+
+            _phase(f"review comments on #{number}", result.notes, collect_review_comments)
 
     return result
