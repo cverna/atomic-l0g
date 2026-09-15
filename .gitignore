@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Secrets -- never commit
+.env
+
+# Derived / regenerable
+cache/
+data/atomic-l0g.db
+data/*.db-wal
+data/*.db-shm
+
+# Scratch
+*.log

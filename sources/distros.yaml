@@ -1,0 +1,173 @@
+# atomic-l0g source registry
+# ==========================
+#
+# One entry per project. Adding a project is a YAML edit -- no code change.
+#
+#   vendor            upstream owner, for reporting
+#   lineage           where the project's code and design came from
+#   update_mechanism  how images are updated in place
+#   repos             provider -> [owner/name, ...]
+#   feeds             label -> RSS/Atom URL
+#   release_endpoints structured release sources
+#
+# Cost control lives in repos.yaml (tiers); noise filtering in bots.yaml.
+#
+# Projects marked BASELINE are the comparison baseline: without them there is
+# nothing to compare the competitors against. Delete the group to drop it.
+
+# --------------------------------------------------------------------------
+# Competitors
+# --------------------------------------------------------------------------
+
+flatcar:
+  vendor: Microsoft
+  lineage: [CoreOS Container Linux]
+  update_mechanism: Omaha (nebraska)
+  repos:
+    github:
+      - flatcar/Flatcar
+      - flatcar/scripts
+      - flatcar/nebraska
+      - flatcar/sysext-bakery
+  feeds:
+    blog: https://flatcar.org/blog/index.xml
+  release_endpoints:
+    - type: flatcar-releases-json
+      url: https://flatcar.org/releases-json/releases.json
+
+azure-container-linux:
+  vendor: Microsoft
+  lineage: [Flatcar Container Linux, Azure Linux]
+  update_mechanism: Omaha (nebraska)
+  repos:
+    github:
+      - microsoft/azure-container-linux
+
+azure-linux:
+  vendor: Microsoft
+  lineage: [CBL-Mariner]
+  update_mechanism: dnf, image-based via ACL
+  repos:
+    github:
+      - microsoft/azurelinux
+      - microsoft/AzureLinuxVulnerabilityData
+
+bottlerocket:
+  vendor: AWS
+  update_mechanism: Bottlerocket update API (A/B partitions)
+  repos:
+    github:
+      - bottlerocket-os/bottlerocket
+      - bottlerocket-os/twoliter
+      - bottlerocket-os/bottlerocket-core-kit
+      - bottlerocket-os/bottlerocket-kernel-kit
+      - bottlerocket-os/bottlerocket-project-website
+  release_endpoints:
+    - type: github-changelog
+      url: https://raw.githubusercontent.com/bottlerocket-os/bottlerocket/develop/CHANGELOG.md
+
+amazon-linux:
+  vendor: AWS
+  lineage: [Amazon Linux 2]
+  update_mechanism: dnf
+  repos:
+    github:
+      - amazonlinux/amazon-linux-2023
+      - amazonlinux/amazon-linux-2027
+      - amazonlinux/container-images
+  release_endpoints:
+    - type: amazonlinux-release-notes
+      url: https://docs.aws.amazon.com/linux/al2023/release-notes/relnotes.html
+
+talos:
+  vendor: Sidero Labs
+  update_mechanism: Talos machine config (A/B image upgrade)
+  repos:
+    github:
+      - siderolabs/talos
+  feeds:
+    blog: https://www.siderolabs.com/feed/
+
+kairos:
+  vendor: Kairos
+  update_mechanism: Kairos upgrade (container-based OS)
+  repos:
+    github:
+      - kairos-io/kairos
+      - kairos-io/hadron
+  feeds:
+    blog: https://kairos.io/blog/rss.xml
+
+universal-blue:
+  vendor: Universal Blue
+  lineage: [Fedora Atomic, bootc]
+  update_mechanism: bootc
+  repos:
+    github:
+      - ublue-os/bluefin
+      - ublue-os/bluefin-lts
+      - ublue-os/ucore
+      - ublue-os/aurora
+      - ublue-os/main
+      - ublue-os/bazzite
+
+opensuse-microos:
+  vendor: SUSE
+  update_mechanism: transactional-update (btrfs snapshots)
+  repos:
+    github:
+      - openSUSE/microos-tools
+      - openSUSE/sysextmgr
+      - openSUSE/combustion
+  feeds:
+    news: https://news.opensuse.org/feed/
+
+rancher-elemental:
+  vendor: SUSE Rancher
+  update_mechanism: Elemental operator (A/B image upgrade)
+  repos:
+    github:
+      - rancher/elemental
+      - rancher/elemental-toolkit
+
+aws-blogs:
+  vendor: AWS
+  feeds:
+    containers: https://aws.amazon.com/blogs/containers/feed/
+    opensource: https://aws.amazon.com/blogs/opensource/feed/
+
+# --------------------------------------------------------------------------
+# BASELINE -- our own projects, kept so competitor data has something to
+# compare against. Remove this block to watch competitors only.
+# --------------------------------------------------------------------------
+
+coreos:
+  vendor: Red Hat
+  lineage: [CoreOS Container Linux]
+  update_mechanism: rpm-ostree, zincati, bootc
+  repos:
+    github:
+      - coreos/coreos-assembler
+      - coreos/fedora-coreos-config
+      - coreos/fedora-coreos-streams
+      - coreos/ignition
+      - coreos/butane
+      - coreos/afterburn
+      - coreos/zincati
+      - coreos/chunkah
+      - coreos/bootupd
+
+rhcos:
+  vendor: Red Hat
+  update_mechanism: rpm-ostree, bootc
+  repos:
+    github:
+      - openshift/os
+
+bootc:
+  vendor: Red Hat
+  update_mechanism: bootc
+  repos:
+    gitlab:
+      - fedora/bootc/base-images
+      - fedora/bootc/docs

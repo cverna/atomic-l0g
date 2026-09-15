@@ -1,0 +1,60 @@
+# Cost-control tiers
+# =================
+#
+# Every repository declared in distros.yaml needs exactly one tier here.
+# `sources validate` fails if a repo is untiered or if a repo is tiered but not
+# declared -- the point is that the decision is always explicit.
+#
+#   core          releases, issues, PRs and comments
+#   watch         releases plus issue/PR metadata
+#   release-only  releases and tags only
+#
+# Promote a repository by moving one line. `core` is where the API budget goes.
+
+tiers:
+  core:
+    - flatcar/Flatcar
+    - flatcar/scripts
+    - microsoft/azure-container-linux
+    - microsoft/azurelinux
+    - bottlerocket-os/bottlerocket
+    - amazonlinux/amazon-linux-2023
+    - amazonlinux/amazon-linux-2027
+    - coreos/coreos-assembler
+    - coreos/fedora-coreos-config
+    - coreos/fedora-coreos-streams
+    - openshift/os
+
+  watch:
+    - flatcar/nebraska
+    - flatcar/sysext-bakery
+    - siderolabs/talos
+    - kairos-io/kairos
+    - kairos-io/hadron
+    - openSUSE/microos-tools
+    - openSUSE/sysextmgr
+    - openSUSE/combustion
+    - rancher/elemental
+    - rancher/elemental-toolkit
+    - coreos/ignition
+    - coreos/butane
+    - coreos/afterburn
+    - coreos/zincati
+    - coreos/chunkah
+    - coreos/bootupd
+    - bottlerocket-os/twoliter
+    - fedora/bootc/base-images
+    - fedora/bootc/docs
+
+  release-only:
+    - ublue-os/bluefin
+    - ublue-os/bluefin-lts
+    - ublue-os/ucore
+    - ublue-os/aurora
+    - ublue-os/main
+    - ublue-os/bazzite
+    - bottlerocket-os/bottlerocket-core-kit
+    - bottlerocket-os/bottlerocket-kernel-kit
+    - bottlerocket-os/bottlerocket-project-website
+    - amazonlinux/container-images
+    - microsoft/AzureLinuxVulnerabilityData

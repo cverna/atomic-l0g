@@ -1,0 +1,75 @@
+# Theme taxonomy
+# ==============
+#
+# Patterns are case-insensitive regular expressions matched against an item's
+# title, summary and body. Used by `al0g themes` for cross-distro rollups --
+# "who is working on systemd-sysext this week" is the kind of question this
+# exists to answer.
+#
+# No scoring and no weights: a theme matches or it does not. The agent decides
+# what matters.
+
+themes:
+  bootc:
+    - '\bbootc\b'
+    - 'image mode'
+
+  sysext:
+    - '\bsysext\b'
+    - 'systemd-sysext'
+    - 'system extension'
+
+  composefs:
+    - '\bcomposefs\b'
+
+  secure-boot:
+    - 'secure ?boot'
+    - '\bUKI\b'
+    - 'unified kernel image'
+
+  confidential-computing:
+    - 'confidential comput'
+    - 'sev-snp'
+    - '\btdx\b'
+
+  kubernetes-node:
+    - 'kubelet'
+    - 'k8s node'
+    - 'aks node'
+    - 'eks node'
+    - 'node image'
+
+  ostree:
+    - '\bostree\b'
+    - 'rpm-ostree'
+
+  ignition:
+    - '\bignition\b'
+
+  immutable-root:
+    - 'immutable'
+    - 'read-?only root'
+
+  update-mechanism:
+    - 'zincati'
+    - 'nebraska'
+    - 'omaha'
+    - 'a/b update'
+    - 'greenboot'
+    - 'transactional-update'
+
+  fips:
+    - '\bfips\b'
+
+  bootloader:
+    - 'bootupd'
+    - 'systemd-boot'
+    - '\bgrub\b'
+    - 'uki'
+
+# Labels that mark an item as security-relevant. Feeds `signal.is_security`.
+security_labels:
+  - 'kind/security'
+  - 'security'
+  - 'CVE'
+  - 'embargoed'

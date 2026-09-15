@@ -1,0 +1,29 @@
+# Bot and noise exclusion
+# =======================
+#
+# Patterns are case-insensitive regular expressions matched against an author's
+# login (GitHub) or username (GitLab). A record is dropped when any pattern
+# matches. Applied at collection time, so it is auditable and adjustable
+# without touching code.
+#
+# Prefer anchored patterns. An unanchored `bot` also matches a human named
+# "abbott", which is exactly the kind of silent data loss this file exists to
+# make visible.
+
+github:
+  - '\[bot\]$'                 # GitHub Apps: dependabot[bot], openshift-ci[bot]
+  - '^dependabot'
+  - '^renovate'
+  - '^konflux'
+  - '^coreosbot'
+  - '^openshift-merge-robot$'
+  - '^openshift-ci(-robot)?$'
+  - '^ci-robot$'
+  - '^gemini-code-assist'
+  - '^copilot'
+  - '^redhat-robots$'
+
+gitlab:
+  - '^renovate'
+  - '^platform-engineering-bot$'
+  - 'bot$'                     # GitLab service accounts are conventionally suffixed
