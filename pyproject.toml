@@ -25,9 +25,13 @@ dependencies = [
     "pydantic-settings>=2.6",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=2.2"]
+
 [project.scripts]
 atomic-l0g = "atomic_l0g.cli:app"
 al0g = "atomic_l0g.cli:app"
+atomic-l0g-mcp = "atomic_l0g.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/atomic_l0g"]

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -98,6 +99,11 @@ class Settings(BaseSettings):
     default_window: str = "7d"
     default_tier: str = "watch"
 
+    #: Where the derived index lives.  Separate from ``data_dir`` so a
+    #: deployment can mount the store read-only and keep the index -- which is
+    #: rebuilt on read when the store has moved on -- on a writable volume.
+    index_path: Optional[Path] = None
+
     @property
     def normalized_dir(self) -> Path:
         return self.data_dir / "normalized"
@@ -112,4 +118,4 @@ class Settings(BaseSettings):
 
     @property
     def db_path(self) -> Path:
-        return self.data_dir / "atomic-l0g.db"
+        return self.index_path or (self.data_dir / "atomic-l0g.db")

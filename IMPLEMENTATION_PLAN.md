@@ -574,7 +574,7 @@ unexplained empty result.
 **Remaining in Phase 2:** `structured/*` (Flatcar release components,
 Bottlerocket CHANGELOG, Amazon Linux HTML notes) and `gitlab.py`.
 
-### Phase 3 — Comments + signal + search
+### Phase 3 — Comments + signal + search  ✅ done
 - Comment records from GitHub and GitLab
 - `signal` frozen fields
 - SQLite views `v_item_signal`, FTS5 index over title/summary/body
@@ -582,6 +582,8 @@ Bottlerocket CHANGELOG, Amazon Linux HTML notes) and `gitlab.py`.
 
 **Done when:** "top 10 discussions in the last 7 days" is answered from SQLite with
 **zero** network calls.
+→ Shipped in Phases 1–2b: comments as first-class records, FTS5 with bm25
+ranking, `v_item_signal`, `top`, `search`.
 
 ### Phase 4 — Analytics
 - `cadence` (releases per week per distro)
@@ -592,7 +594,7 @@ Bottlerocket CHANGELOG, Amazon Linux HTML notes) and `gitlab.py`.
 **Done when:** `al0g cadence` shows a real releases/week series and `al0g lineage` renders
 the ACL-on-Flatcar relationship.
 
-### Phase 5 — MCP server
+### Phase 5 — MCP server  ✅ done
 Interface: **MCP over Streamable HTTP** (not the deprecated SSE), plus stdio
 for local use. One tool per read command.
 
@@ -625,6 +627,35 @@ for local use. One tool per read command.
 
 **Done when:** the digest prompt answers from MCP tools alone, with the agent
 never invoking the CLI.
+
+**Built.** Notes from doing it, since the plan guessed wrong in one place:
+
+- `FastMCP` was **renamed to `MCPServer`** in SDK 2.x (`mcp.server.mcpserver`).
+  The 1.x import path now raises with a pointer to the migration guide. Any
+  code written from 1.x examples would have failed on first run, which is what
+  the Step 0 API check was for.
+- **No second query path was needed.** Each tool shells out to
+  `python -m atomic_l0g ... --json`; invoking as a module avoids depending on a
+  console script being on `PATH` in a container.
+- **The SDK already defaults `enable_dns_rebinding_protection=True`**, so the
+  Origin work was configuration, not implementation.
+- **Host matching is exact or `host:*` — there is no wildcard.** A fallback
+  allow-list of `["*"]` matches no real Host and rejects everything. An unset
+  allow-list therefore means localhost only, and a public deployment must name
+  its Route hostname.
+- **MCP structured content must be an object**, so a returned list gets wrapped
+  by the SDK under a generic `result` key. List tools wrap it themselves as
+  `{count, items}` instead, which reads better to an agent.
+- Limits are **clamped, not rejected** — an agent should not have to retry to
+  get an answer. Verified: `limit=9999` returns 200.
+
+Verified: 7 tools over stdio with real data, zero errors; the same over HTTP
+with `initialize`/`tools_list`/`call_tool`; `/healthz` returns 200 and is
+exempt from transport security; a disallowed Origin is refused with 403 while
+an allowed one and an absent one pass.
+
+**Outstanding:** running the digest prompt *against MCP* needs the server
+registered in an MCP-capable client, which is the user's side to do.
 
 ### Phase 6 — OpenShift deployment
 Two workloads, one shared store, and the exposed process holds no credentials.

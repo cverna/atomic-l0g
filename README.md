@@ -20,11 +20,11 @@ Separate **fetching** from **analysis**.
 
 ## Status
 
-Phases 0–2a are done: registry, data model, GitHub collector, RSS/Atom feed
-collector, append-only JSONL store, SQLite index, and the `sync` / `list` /
-`show` / `search` / `top` / `fetch` commands. Structured collectors (Flatcar
-`releases.json`, Bottlerocket CHANGELOG, Amazon Linux release notes) and GitLab
-are next. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+Phases 0–3 and 5 are done: registry, data model, GitHub and feed collectors,
+append-only JSONL store, SQLite index, the CLI, and a read-only MCP server over
+stdio and streamable HTTP. Remaining: the structured collectors and GitLab
+(Phase 2), the analytics commands (Phase 4), and the OpenShift deployment
+(Phase 6). See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 ## Development
 
@@ -58,9 +58,53 @@ must report `new 0`.
 ## Prompts
 
 `prompts/weekly-digest.md` drives an agent through the weekly cross-ecosystem
-digest using only the CLI. It doubles as the specification for the interface:
-if a prompt needs something the commands cannot express, that is a missing
-command, not a reason to read the data files.
+digest. It doubles as the specification for the interface: if a prompt needs
+something the commands cannot express, that is a missing command, not a reason
+to read the data files.
+
+## MCP server
+
+Read-only tools over the same store, so an agent never touches the CLI's output
+format or the storage layout.
+
+```bash
+python -m pip install -e ".[mcp]"     # the extra; the CLI does not need it
+atomic-l0g-mcp --transport stdio      # for a local client
+```
+
+Client configuration, local:
+
+```json
+{"mcpServers": {"atomic-l0g": {
+  "command": "/workspace/atomic-l0g/.venv/bin/python",
+  "args": ["-m", "atomic_l0g.mcp.server", "--transport", "stdio"]}}}
+```
+
+Served over HTTP, for a shared endpoint:
+
+```bash
+ATOMIC_L0G_ALLOWED_HOSTS="al0g-mcp.apps.example.com" \
+  atomic-l0g-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+Exposed tools are read-only: `ecosystem_stats`, `ecosystem_top`,
+`ecosystem_list`, `ecosystem_releases`, `ecosystem_search`, `ecosystem_show`,
+`ecosystem_sources`. **`sync` and `fetch` deliberately have no tool** — `sync`
+writes to the source of truth, and `fetch` would spend whatever credentials the
+process holds. Result sets are capped (200, or 100 for search) and requests are
+clamped rather than rejected, so an agent never has to retry to get an answer.
+
+Host and Origin validation is on by default. The allow-list matching is exact
+or `host:*` — there is no wildcard — so a public deployment must set
+`ATOMIC_L0G_ALLOWED_HOSTS` to its Route hostname; unset means localhost only.
+`/healthz` is available for liveness and readiness probes.
+
+The derived index can be kept off the store's volume, which is what lets a
+deployment mount the store read-only:
+
+```bash
+ATOMIC_L0G_DATA_DIR=/store ATOMIC_L0G_INDEX_PATH=/tmp/atomic-l0g.db atomic-l0g-mcp ...
+```
 
 ## Configuration
 
