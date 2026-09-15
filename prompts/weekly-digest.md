@@ -28,25 +28,37 @@ Read commands. Every one accepts `--distro` and most accept `--since`
     al0g stats    --since 7d              counts by project: new, active,
                                           comments, releases
     al0g top      --since 7d --limit 25   ranked by recent discussion
-    al0g list     --kind release --since 7d
+    al0g list     --kind pr --since 7d
                   --kind pr --state merged
                   --security
-    al0g releases --since 90d             release timeline + cadence footer
+    al0g releases --since 90d             release timeline (ids printed)
+                                          + cadence footer
     al0g search   "<terms>" [--kind blog] full-text search
     al0g show     <id>                    one full record
-    al0g fetch    <id> --diff             live pull-request diff, on demand
+    al0g fetch    <id> --diff              live pull-request diff, on demand
+    al0g fetch    <id> --comments --since 7d   the discussion behind a count
+    al0g sources show <project>            repos, tiers and last-collected
 
 Work entirely through these commands. Do not read `data/` and do not query the
 database directly — the storage layout is an implementation detail and is
 liable to change.
 
+Comment counts and `fetch --comments` agree: both exclude bot authors and both
+filter on the comment's creation time. `--all-authors` widens `fetch` only.
+
 ## Coverage
 
-39 GitHub repositories and 6 blog feeds across 12 projects:
+The registry declares 14 projects; 12 have collected data — 39 GitHub
+repositories and 6 blog feeds:
 
     universal-blue, flatcar, bottlerocket, kairos, talos, azure-linux, coreos,
     rancher-elemental, opensuse-microos, azure-container-linux, amazon-linux,
-    rhcos
+    rhcos, aws-blogs (feeds only)
+
+The `bootc` project is registered but collects nothing: its repositories are on
+GitLab, which has no collector. **A zero there means "not collected", not
+"quiet".** Confirm with `al0g sources show <project>`, which reports each
+repository and when it was last collected.
 
 Activity (issues, PRs, blogs) covers roughly the last 7-14 days. Releases go
 back about 200 per repository.
@@ -56,12 +68,15 @@ back about 200 per repository.
   - GitLab is not collected (no token). The fedora/bootc group is absent, so
     this is not a complete picture of bootc activity.
   - Releases carry notes but no component versions, so kernel and systemd
-    drift cannot be compared yet.
+    drift cannot be compared. Some notes mention versions in prose; that is not
+    a queryable field.
   - No diffs are stored. `al0g fetch <id> --diff` retrieves one live.
   - Comments exist only for core-tier repositories (Flatcar, Bottlerocket,
     Azure Linux, Amazon Linux, CoreOS, RHCOS). Watch-tier repositories
     (Talos, Kairos, openSUSE MicroOS, Rancher Elemental) show zero comment
     counts — that is missing data, not silence. Do not read it as "no debate".
+  - `--security` matches labels, and only Azure Linux and Flatcar label
+    consistently. It cannot rank patch speed for the other projects.
   - Bots are filtered by design, so automated-update volume is absent.
   - openshift/os tracks most work in Jira; a quiet issue feed there is
     expected and is not a signal.
@@ -96,4 +111,7 @@ State the date range actually covered.
   - Do not read `data/` or open the database. If a question needs a field or a
     filter the commands do not expose, say so and describe the command that
     would be needed. That is a useful finding, not a failure.
+  - Before calling a project quiet, check `al0g sources show <project>`: a
+    never-collected repository and a genuinely idle one look identical in
+    every other command.
   - No filler, no hedging boilerplate, no restating the task.

@@ -18,7 +18,7 @@ import typer
 from atomic_l0g import __version__
 from atomic_l0g.collectors import base as collector_base
 from atomic_l0g.collectors.github import parse_item_id
-from atomic_l0g.http import github_client, request
+from atomic_l0g.http import github_client, paginate, request
 from atomic_l0g.registry import (
     Registry,
     default_sources_dir,
@@ -237,6 +237,105 @@ def sources_list(sources: Optional[Path] = _sources_opt()) -> None:
         typer.echo(f"{name:<24} {project.vendor or '-':<16} {detail}")
 
 
+@sources_app.command("show")
+def sources_show(
+    project: str = typer.Argument(..., help="Project name, e.g. flatcar."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+    sources: Optional[Path] = _sources_opt(),
+) -> None:
+    """Show one project's repositories, feeds and last collection time.
+
+    Answers the question a bare zero cannot: is this project quiet, or is it
+    simply not being collected?  A registered project with no cursor has never
+    been collected, which is different from having nothing to report.
+    """
+    registry = _load(sources)
+    entry = registry.projects.get(project)
+    if entry is None:
+        available = ", ".join(sorted(registry.projects))
+        typer.secho(
+            f"unknown project {project!r}; available: {available}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    cursors = Settings().cursors_dir
+
+    def last_collected(provider: str, key: str) -> Optional[str]:
+        path = cursors / f"{provider}__{key.replace('/', '__')}.json"
+        if not path.is_file():
+            return None
+        try:
+            return jsonlib.loads(path.read_text(encoding="utf-8")).get("last_sync")
+        except (OSError, ValueError):
+            return None
+
+    payload = {
+        "project": project,
+        "vendor": entry.vendor,
+        "lineage": entry.lineage,
+        "update_mechanism": entry.update_mechanism,
+        "repos": [
+            {
+                "provider": provider,
+                "repo": repo,
+                "tier": registry.repo_tiers.get(repo),
+                "last_collected": last_collected(provider, repo),
+            }
+            for provider, repo in entry.repositories()
+        ],
+        "feeds": [
+            {
+                "label": label,
+                "url": url,
+                "last_collected": last_collected("feed", f"{project}:{label}"),
+            }
+            for label, url in entry.feeds.items()
+        ],
+        "release_endpoints": [
+            {"type": endpoint.type, "url": endpoint.url}
+            for endpoint in entry.release_endpoints
+        ],
+    }
+
+    if as_json:
+        typer.echo(jsonlib.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    typer.secho(project, bold=True)
+    for label, value in (
+        ("vendor", entry.vendor),
+        ("lineage", ", ".join(entry.lineage) or None),
+        ("update", entry.update_mechanism),
+    ):
+        if value:
+            typer.echo(f"  {label:<9} {value}")
+
+    if payload["repos"]:
+        typer.echo()
+        typer.secho(f"  {'REPOSITORY':<46} {'TIER':<14} LAST COLLECTED", bold=True)
+        for row in payload["repos"]:
+            typer.echo(
+                f"  {row['repo']:<46} {row['tier'] or '-':<14} "
+                f"{row['last_collected'] or 'never'}"
+            )
+
+    if payload["feeds"]:
+        typer.echo()
+        typer.secho(f"  {'FEED':<18} LAST COLLECTED", bold=True)
+        for row in payload["feeds"]:
+            typer.echo(
+                f"  {row['label']:<18} {row['last_collected'] or 'never':<22} {row['url']}"
+            )
+
+    if payload["release_endpoints"]:
+        typer.echo()
+        typer.secho("  release endpoints", bold=True)
+        for endpoint in payload["release_endpoints"]:
+            typer.echo(f"  {endpoint['type']:<24} {endpoint['url']}")
+
+
 # ---------------------------------------------------------------------------
 # sync
 # ---------------------------------------------------------------------------
@@ -386,6 +485,16 @@ def list_items(
 
     where = ["1 = 1"]
     params: list[object] = []
+
+    if kind and "release" in kind:
+        typer.secho(
+            "note: releases are not items -- use `al0g releases` to list them",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        kind = [entry for entry in kind if entry != "release"]
+        if not kind:
+            return
 
     if distro:
         where.append(_in_clause("i.distro", distro))
@@ -576,7 +685,7 @@ def releases(
         dict(row)
         for row in connection.execute(
             f"""
-            SELECT r.distro, r.version, r.channel, r.release_date, r.url
+            SELECT r.id, r.distro, r.version, r.channel, r.release_date, r.url
             FROM releases r
             WHERE {clause}
             ORDER BY r.release_date DESC, r.version DESC
@@ -613,11 +722,14 @@ def releases(
         typer.secho(f"no releases since {since}", fg=typer.colors.YELLOW)
         return
 
-    typer.secho(f"{'DATE':<12} {'DISTRO':<24} {'CHANNEL':<12} VERSION", bold=True)
+    # The id is printed because it is the citation, and because a project name
+    # alone ("flatcar") does not identify the repository that carries the
+    # release, so it cannot be reconstructed.
+    typer.secho(f"{'DATE':<12} {'DISTRO':<22} {'CHANNEL':<12} {'VERSION':<22} ID", bold=True)
     for row in rows:
         typer.echo(
-            f"{row['release_date'] or '?':<12} {row['distro']:<24} "
-            f"{row['channel'] or '-':<12} {row['version']}"
+            f"{row['release_date'] or '?':<12} {row['distro']:<22} "
+            f"{row['channel'] or '-':<12} {row['version']:<22} {row['id']}"
         )
 
     typer.echo()
@@ -805,6 +917,12 @@ def fetch(
     item_id: str = typer.Argument(..., help="Record id to reach past the store for."),
     diff: bool = typer.Option(False, "--diff", help="Print the live pull-request diff."),
     comments: bool = typer.Option(False, "--comments", help="Print the live comments."),
+    all_authors: bool = typer.Option(
+        False,
+        "--all-authors",
+        help="Include bot-authored comments, labelled. The default mirrors the "
+        "activity counts, which exclude bots.",
+    ),
     window: Optional[str] = typer.Option(None, "--since", help="Limit comments to a window."),
 ) -> None:
     """Reach past the store on demand.
@@ -827,6 +945,14 @@ def fetch(
         typer.echo(jsonlib.dumps(record.get("fetch_ref") or {}, indent=2))
         return
 
+    bot_patterns: list[object] = []
+    try:
+        bot_patterns = collector_base.compile_bots(
+            load_registry(None).bots.get("github", [])
+        )
+    except (FileNotFoundError, ValueError):
+        bot_patterns = []
+
     try:
         client = github_client(Secrets())
     except SecretMissing as missing:
@@ -844,16 +970,55 @@ def fetch(
             typer.echo(response.text)
 
         if comments:
-            params = {}
+            since: Optional[str] = None
             if window:
-                params["since"] = collector_base.window_start(window)
-            response = request(
-                client, f"/repos/{repo}/issues/{number}/comments", params=params
-            )
-            response.raise_for_status()
-            for comment in response.json():
+                since = collector_base.window_start(window)
+
+            collected: list[tuple[str, bool, bool, dict]] = []
+            hidden = 0
+            for path, review in (
+                (f"/repos/{repo}/issues/{number}/comments", False),
+                (f"/repos/{repo}/pulls/{number}/comments", True),
+            ):
+                # Paginate. A single request returns only the first page, and
+                # both endpoints page in a stable order that is not
+                # newest-first, so an unpaginated fetch shows a stale slice.
+                query = {"since": since} if since else None
+                for comment in paginate(client, path, query):
+                    created = comment.get("created_at") or ""
+                    # GitHub's `since` filters on updated_at, but the activity
+                    # counts use created_at. Filter again here so `--since`
+                    # means the same thing in both places.
+                    if since and created < since:
+                        continue
+                    login = (comment.get("user") or {}).get("login")
+                    bot_author = collector_base.is_bot(login, bot_patterns)
+                    if bot_author and not all_authors:
+                        hidden += 1
+                        continue
+                    collected.append((created, review, bot_author, comment))
+
+            if not collected:
+                typer.secho("no comments in window", fg=typer.colors.YELLOW)
+                return
+
+            # Issue comments and review comments are merged chronologically.
+            # Both count toward the activity numbers `top` and `stats` report,
+            # so both have to be retrievable or the counts mislead.
+            for created, review, bot_author, comment in sorted(
+                collected, key=lambda row: row[0]
+            ):
                 author = (comment.get("user") or {}).get("login", "?")
-                created = (comment.get("created_at") or "")[:10]
-                typer.echo(f"--- @{author} ({created})")
+                markers = [name for name, on in (("review", review), ("bot", bot_author)) if on]
+                suffix = f" [{', '.join(markers)}]" if markers else ""
+                typer.echo(f"--- @{author} ({created[:10]}){suffix}")
                 typer.echo(comment.get("body") or "")
                 typer.echo()
+
+            if hidden:
+                typer.secho(
+                    f"{hidden} bot-authored comment(s) hidden; "
+                    "the activity counts exclude them too. Use --all-authors to include.",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
