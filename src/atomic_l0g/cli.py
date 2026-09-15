@@ -936,7 +936,7 @@ def fetch(
         typer.secho(f"no record with id {item_id!r}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
-    provider, repo, _kind, number = parse_item_id(item_id)
+    provider, repo, kind, number = parse_item_id(item_id)
     if provider != "github":
         typer.secho(f"fetch does not support provider {provider!r} yet", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
@@ -976,10 +976,14 @@ def fetch(
 
             collected: list[tuple[str, bool, bool, dict]] = []
             hidden = 0
-            for path, review in (
-                (f"/repos/{repo}/issues/{number}/comments", False),
-                (f"/repos/{repo}/pulls/{number}/comments", True),
-            ):
+            endpoints = [(f"/repos/{repo}/issues/{number}/comments", False)]
+            if kind == "pr":
+                # Review comments exist only on pull requests. Asking for them
+                # on an issue returns 403, not an empty list, so the endpoint is
+                # added only when the item is a PR.
+                endpoints.append((f"/repos/{repo}/pulls/{number}/comments", True))
+
+            for path, review in endpoints:
                 # Paginate. A single request returns only the first page, and
                 # both endpoints page in a stable order that is not
                 # newest-first, so an unpaginated fetch shows a stale slice.
