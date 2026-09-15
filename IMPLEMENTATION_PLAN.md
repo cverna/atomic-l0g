@@ -33,13 +33,16 @@ does the first half so the agent can do the second half off local data.
 | Name | `atomic-l0g` (CLI alias `al0g`) |
 | Python package | `atomic_l0g` |
 | Language | Python 3.14 (venv-based; see §9) |
-| Interface | CLI first, MCP server in Phase 5 |
+| Interface | CLI today; MCP server (Streamable HTTP + stdio) is the agent interface (§11 Phase 5) |
+| Interaction rule | An agent talks to the CLI or MCP only — never to tables, files or the index |
 | Storage | Git-committed JSONL + derived SQLite |
 | Detail depth | Metadata + bodies + comments. **No diffs** — fetched on demand |
 | GitHub access | REST + PAT (`/run/secrets/github-token` or `GITHUB_TOKEN`) |
 | GitLab access | REST v4 + PAT (`/run/secrets/gitlab-token` or `GITLAB_TOKEN`) |
 | Secrets | `pydantic-settings` reading `/run/secrets` or the environment (§9.1) |
-| Collection | Manual now, scheduled CI later |
+| Collection | OpenShift CronJob, incremental, hourly (§11 Phase 6) |
+| Deployment | OpenShift: collector holds the token, the exposed MCP server holds none |
+| Agent surface | Read-only. `sync` is never exposed; `fetch` is local-only |
 | Triage fields | `title` / `summary` / `body` — passthrough whatever the source has |
 | Ranking | Frozen `signal` (comments, reactions, labels) + window-relative SQL view |
 | Verification | Run it live against the real APIs. No unit tests, by choice (§12) |
@@ -61,18 +64,33 @@ does the first half so the agent can do the second half off local data.
    +----------------------------------------------+
    |  Store                                        |
    |   data/normalized/<YYYY-MM>.jsonl  (committed)|
-   |   data/releases/*.json             (committed)|
    |   data/cursors/*.json              (committed)|
    |              |                                |
-   |              v  materialize                   |
-   |   data/atomic-l0g.db  (SQLite, gitignored)    |
+   |              v  materialize (derived)         |
+   |   atomic-l0g.db  (SQLite, gitignored)         |
    +----------------------------------------------+
                           |
                           v
    +----------------------------------------------+
-   |  Query surface                                |
-   |   CLI (`al0g`)  -->  MCP server (Phase 5)     |
+   |  Query surface -- the ONLY agent interface    |
+   |   CLI  `al0g ... --json`                      |
+   |    +-- MCP server (Streamable HTTP, stdio)    |
    +----------------------------------------------+
+```
+
+Nobody outside this box touches the store directly. Not the agent, not the MCP
+server -- both go through the CLI. Storage layout, the index and the
+append-only contract stay private, so they can change without breaking a
+prompt.
+
+In deployment the two halves separate, and only one of them holds credentials:
+
+```
+   [ CronJob: collector ]              [ Deployment: MCP read server ]
+    GITHUB_TOKEN from a Secret          no secrets at all
+    writes JSONL + cursors     --->     mounts the store read-only
+    hourly, Forbid                      index on an emptyDir
+                                        Service + Route (TLS)
 ```
 
 **Extensibility rule:** adding a distro is a YAML edit, never a code change. Adding a
@@ -317,22 +335,43 @@ repo small.
 ## 8. CLI
 
 ```
-al0g sources validate                  # lint the registry before syncing
-al0g sync [--distro X] [--since 7d] [--tier core]
-al0g list --kind pr --since 7d --json
-al0g show <id>
-al0g search "sysext"                   # SQLite FTS5 over title/summary/body
-al0g releases [--distro X] [--since 30d]
-al0g top --since 7d [--distros flatcar,bottlerocket]
-al0g fetch <id> --diff                 # escape hatch, live API call
-al0g fetch <id> --comments --since 7d
-al0g digest --since 7d                 # cross-distro markdown report
-al0g db build                          # JSONL -> SQLite
-al0g cadence | versions | themes | lineage
+al0g sources validate | list | show <project>   # registry + collection health
+al0g sync [--distro X] [--since 7d] [--tier core]   # WRITE -- collector only
+al0g stats    --since 7d                        # counts by project
+al0g top      --since 7d [--security]           # ranked by recent discussion
+al0g list     --kind pr --state merged --security
+al0g releases [--distro X] [--since 90d] [--channel stable]
+al0g search   "sysext" [--kind blog]            # FTS5, bm25 ranked
+al0g show     <id>                              # one full record
+al0g fetch    <id> --diff | --comments [--since 7d]  # escape hatch, live API
+al0g db build                                   # derived index
 ```
 
-`--json` on every read command. This is why the Phase 5 MCP server is a thin wrapper
-rather than a rewrite.
+Planned in Phase 4: `al0g cadence | versions | themes | lineage`.
+
+Every read command takes `--json` and `--since`, and repairs the index itself
+when the store has moved on, so there is no build step to remember.
+
+**MCP exposes the same surface, read-only:**
+
+| MCP tool | Backed by |
+|---|---|
+| `ecosystem_stats` | `al0g stats --json` |
+| `ecosystem_top` | `al0g top --json` |
+| `ecosystem_list` | `al0g list --json` |
+| `ecosystem_releases` | `al0g releases --json` |
+| `ecosystem_search` | `al0g search --json` |
+| `ecosystem_show` | `al0g show --json` |
+| `ecosystem_sources` | `al0g sources show --json` |
+
+`sync` and `fetch` get no MCP tool. `sync` writes to the source of truth;
+`fetch` would spend the serving pod's credentials, and the serving pod is
+deliberately given none.
+
+**Interaction rule:** an agent talks to the CLI or MCP and nothing else. If a
+question needs a filter neither exposes, the answer is to add a command — not
+to read the JSONL or open the index. That rule is what keeps the storage free
+to change, and it is why the CLI surface is the thing that grows.
 
 ---
 
@@ -419,6 +458,9 @@ atomic-l0g/
 │   ├── __init__.py
 │   ├── model.py                # Item / Comment / Release
 │   ├── registry.py             # load + validate registry, fail loud
+│   ├── settings.py             # pydantic-settings config + /run/secrets
+│   ├── http.py                 # clients, pagination, retry, rate guard
+│   ├── sync.py                 # target walk, per-target isolation
 │   ├── store/
 │   │   ├── jsonl.py            # append-only writer, dedup + revision
 │   │   └── db.py               # JSONL -> SQLite materialisation + views
@@ -436,16 +478,22 @@ atomic-l0g/
 │   │   ├── versions.py
 │   │   ├── themes.py
 │   │   └── lineage.py
+│   ├── mcp/
+│   │   └── server.py           # read-only tools wrapping the --json CLI
 │   └── cli.py
+├── deploy/
+│   ├── Containerfile           # ubi9-minimal + Python 3.12
+│   ├── cronjob.yaml            # al0g-sync, GITHUB_TOKEN from a Secret
+│   ├── deployment.yaml         # al0g-mcp, no secrets, store read-only
+│   ├── route.yaml              # TLS, host allow-list
+│   └── pvc.yaml                # RWX; or omit for the single-pod fallback
+├── prompts/
+│   └── weekly-digest.md        # reference task; doubles as interface spec
 ├── data/
 │   ├── normalized/
-│   ├── releases/
 │   ├── cursors/
-│   └── annotations/
-├── reports/
-└── tests/
-    ├── fixtures/               # recorded API/feed payloads
-    └── test_*.py
+│   └── annotations/            # never mounted into the served store
+└── reports/
 ```
 
 ---
@@ -544,21 +592,93 @@ Bottlerocket CHANGELOG, Amazon Linux HTML notes) and `gitlab.py`.
 **Done when:** `al0g cadence` shows a real releases/week series and `al0g lineage` renders
 the ACL-on-Flatcar relationship.
 
-### Phase 5 — Agent layer
-- MCP server wrapping the `--json` CLI surface
-- Rewrite `coreos-activity` → `image-mode-ecosystem` skill, reading the store first and
-  only going live when data is stale
-- `data/annotations/` protocol for agent-written summaries
+### Phase 5 — MCP server
+Interface: **MCP over Streamable HTTP** (not the deprecated SSE), plus stdio
+for local use. One tool per read command.
 
-**Done when:** the skill answers a 7-day cross-distro question with no live API calls when
-the store is fresh.
+- **Library**: the official `mcp` SDK, behind an optional extra (`[mcp]`) so the
+  CLI still installs without a web stack. `pydantic` is already present via
+  `pydantic-settings`, so tool-schema generation costs nothing new.
+  Rejected `fastmcp`: heavier still, depends on `mcp` anyway, and its value is
+  auth, middleware and hosted deployment, none of which is needed here.
+- **Tools are subprocess wrappers** around `al0g ... --json`, returning
+  `structuredContent`. Measured CLI overhead is ~220 ms of interpreter and
+  `pydantic` import, ~250 ms per call, against LLM latency measured in tens of
+  seconds. Shelling out keeps the CLI as the single implementation of every
+  query, so the two can never drift. The `--json` contract is what makes this
+  a wrapper rather than a rewrite.
+- **Not exposed: `sync`.** It writes to the source of truth, advances cursors,
+  and spends the GitHub API budget.
+- **`fetch` is not exposed on the remote transport.** It makes live API calls
+  with the server's credentials; a public, unauthenticated endpoint would let
+  any caller drain the 5000 req/hr budget and break collection. Available over
+  stdio for local use.
+- **Tool descriptions carry the caveats** — which projects have comment data,
+  that a zero can mean "never collected" rather than "quiet". This is where
+  that knowledge lives, so the prompt shrinks to the task and cannot drift from
+  the interface.
+- **Code change**: separate the derived index from the store, so a deployment
+  can mount the store read-only and keep the index on a writable volume. New
+  setting `ATOMIC_L0G_INDEX_PATH` (default `data_dir/atomic-l0g.db`).
+  `_ensure_index` then works unchanged: it stats the JSONL and rebuilds into
+  the writable index path whenever the store has moved on.
 
-### Phase 6 — Automation
-- Scheduled job (Gitea Actions on forge.fedoraproject.org), same container image as local
-- Weekly cross-distro digest into `reports/`
-- Repo hygiene: confirm growth stays bounded
+**Done when:** the digest prompt answers from MCP tools alone, with the agent
+never invoking the CLI.
 
-**Done when:** the digest lands weekly without manual intervention.
+### Phase 6 — OpenShift deployment
+Two workloads, one shared store, and the exposed process holds no credentials.
+
+```
+  CronJob  al0g-sync             Deployment  al0g-mcp
+  has GITHUB_TOKEN               no secrets at all
+  hourly, concurrencyPolicy:     mounts store read-only
+    Forbid                       derived index on emptyDir
+  writes JSONL + cursors         Service + Route (TLS)
+        |                                  ^
+        +---------- PVC (RWX) -------------+
+             data/normalized, data/cursors
+```
+
+- **Secrets.** The collector's `GITHUB_TOKEN` comes from a Secret mounted as a
+  file at `/run/secrets/github-token` — already the default location
+  `settings.SECRETS_DIR` expects, so no code change is needed. The read server
+  mounts nothing, so compromising it leaks no credentials and costs no budget.
+- **Storage.** `data/normalized` and `data/cursors` live on a ReadWriteMany PVC
+  so the CronJob can write while the server reads. If the cluster has no RWX
+  storage class, fall back to a single Deployment running an in-process
+  scheduler: one pod, one RWO PVC, no cross-pod sharing.
+- **Freshness needs no orchestration.** `_ensure_index` already compares the
+  store's mtime against the index on every read, so the server picks up the
+  CronJob's writes by itself. Keeping the index on an emptyDir is what allows
+  the shared PVC to stay read-only.
+- **No auth, but scoped.** Read-only tools only; a server-side ceiling on
+  `--limit`; no `sync`; no `fetch`; and **`Origin` header validation** — the
+  MCP spec recommends it, because without it a web page can reach the server
+  via DNS rebinding. TLS terminates at the Route. Add a per-client request
+  budget in middleware, since OpenShift Routes do not rate-limit.
+- **The served store is facts only.** `data/annotations/` — the agent-written
+  summary layer — is never mounted. That is the one thing in the design that is
+  genuinely not public.
+- **Image.** `ubi9/ubi-minimal` with the distribution's Python 3.12, not the
+  3.14 used locally. `requires-python` stays `>=3.11`; verify the code and the
+  `mcp`/`pydantic` wheels against the deployment interpreter before shipping.
+  Build with `podman build` or an OpenShift BuildConfig.
+- **Probes.** A `/healthz` endpoint distinct from the MCP endpoint, for
+  liveness and readiness.
+
+**Done when:** the digest prompt runs against the deployed HTTP endpoint, and
+a caller cannot spend the collector's API token.
+
+### Phase 7 — Skill
+- Rewrite `coreos-activity` → `image-mode-ecosystem`, pointing at the MCP
+  server (or the local CLI) rather than shell recipes
+- Keep the weekly digest prompt as the reference task
+- `data/annotations/` protocol for agent-written summaries, kept out of the
+  served store
+
+**Done when:** the skill answers a 7-day cross-distro question with no live API
+calls when the store is fresh.
 
 ---
 
@@ -593,6 +713,13 @@ which is where genuinely silent failure lives.
 | Silent source drift | Per-collector health reported on every `sync`. |
 | Feed/HTML scraper rot | Scrapers isolated in `structured/`; breakage is visible, not fatal. |
 | GitLab auth | Blocked until a PAT exists; GitHub-first path is unaffected. |
+| Public endpoint drains the API token | `sync` and `fetch` are never exposed remotely. The MCP server holds no credentials and is read-only, so a caller can neither spend the budget nor mutate the store. |
+| Public endpoint serves internal analysis | Only `data/normalized` and `data/cursors` are mounted. `data/annotations` is excluded by design. |
+| Unbounded queries on a public endpoint | Server-side ceiling on `--limit`, a per-client request budget in middleware, and no `fetch` (the one tool that would make outbound calls). |
+| DNS rebinding against the MCP server | `Origin` header validation, as the MCP spec recommends; TLS and host allow-listing at the Route. |
+| Derived index vs read-only store | `ATOMIC_L0G_INDEX_PATH` lets the index live on a writable volume while the store is mounted read-only. |
+| Interpreter drift (dev 3.14, deploy 3.12) | `requires-python` stays `>=3.11`; verify code and wheels against the deployment interpreter before shipping. |
+| No RWX storage class | Fall back to a single Deployment with an in-process scheduler: one pod, one RWO PVC. |
 
 ---
 
@@ -608,6 +735,10 @@ which is where genuinely silent failure lives.
 | **`GITLAB_TOKEN`** | ❌ needed (`read_api`); `glab` currently returns 401 |
 | `bottlerocket.aws` reachability | ❌ fails here — fall back to `raw.githubusercontent.com` + `releases.atom` |
 | AL2023 release notes RSS | ❌ none — HTML scraper required |
+| `mcp` SDK on the deployment interpreter | ❌ unverified — confirm wheels for 3.12 (deploy target) and 3.14 (dev) before Phase 5 |
+| `podman build` locally | ⚠️ podman 5.8.4 is rootless under a QEMU provider with no `buildah`/`skopeo` binary — confirm a build, or use an OpenShift BuildConfig |
+| OpenShift storage class | ❌ unknown — RWX simplifies Phase 6; without it use the single-Deployment fallback |
+| Public Route | ❌ to be decided — hostname and TLS termination |
 
 ---
 
@@ -618,3 +749,8 @@ which is where genuinely silent failure lives.
 - A web dashboard or UI (agent + markdown reports are the interface)
 - Baked-in importance scoring (raw signals are exposed; the agent weighs them)
 - Backfilling history before first collection (the store starts now and grows forward)
+- **MCP authentication.** There is nothing confidential in the served store. The
+  exposure that matters is metered API budget and write paths, and both are
+  handled by never exposing `sync` or `fetch` and by keeping credentials out of
+  the serving pod — not by authenticating callers.
+- **Serving the annotations layer.** If it is ever populated, it stays internal.
