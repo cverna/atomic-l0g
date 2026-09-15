@@ -20,10 +20,11 @@ Separate **fetching** from **analysis**.
 
 ## Status
 
-Phases 0 and 1 are done: registry, data model, GitHub collector, append-only
-JSONL store, SQLite index and the `sync` / `list` / `show` / `fetch` commands.
-Feed, structured and GitLab collectors are next. See
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+Phases 0–2a are done: registry, data model, GitHub collector, RSS/Atom feed
+collector, append-only JSONL store, SQLite index, and the `sync` / `list` /
+`show` / `search` / `top` / `fetch` commands. Structured collectors (Flatcar
+`releases.json`, Bottlerocket CHANGELOG, Amazon Linux release notes) and GitLab
+are next. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 ## Development
 
@@ -39,8 +40,10 @@ Then:
 ```bash
 al0g sources validate              # lint the registry
 al0g sources list                  # list watched projects
-al0g sync --distro flatcar         # collect
+al0g sync --distro flatcar         # collect repos and feeds
 al0g list --since 7d               # read from the index
+al0g top --since 7d                # rank by recent discussion activity
+al0g search sysext                 # full-text search
 al0g fetch <id> --diff             # reach past the store on demand
 ```
 

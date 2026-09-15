@@ -27,6 +27,7 @@ __all__ = [
     "github_client",
     "gitlab_client",
     "paginate",
+    "plain_client",
     "request",
 ]
 
@@ -130,6 +131,15 @@ def gitlab_client(secrets: Secrets) -> httpx.Client:
             "Accept": "application/json",
             "PRIVATE-TOKEN": secrets.require("gitlab_token"),
         },
+    )
+
+
+def plain_client() -> httpx.Client:
+    """An unauthenticated client, for public feeds."""
+    return httpx.Client(
+        headers={"User-Agent": USER_AGENT},
+        timeout=httpx.Timeout(30.0, connect=10.0),
+        follow_redirects=True,
     )
 
 

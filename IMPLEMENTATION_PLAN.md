@@ -491,6 +491,27 @@ releases come from the GitHub releases API and carry notes but no components.
 **Done when:** every distro in §5.1 appears in `al0g list`; no collector reports an
 unexplained empty result.
 
+**Progress — 2a done (feeds, search, top):**
+- `collectors/feed.py` -- RSS/Atom into `item_kind="blog"`, ids
+  `feed:<project>:<label>:<hash12>` so they stay stable across runs. Feeds beat
+  the GitHub API on one axis: most supply a real `summary`, the field an agent
+  triages on. Summary markup is collapsed to text; `body` keeps the original.
+- Feeds are the pseudo-tier `feed`. They need no credentials and consume no API
+  budget, so they are collected first — a rate-limited run still gets its blogs.
+- `al0g search` (FTS5, `bm25` ranking, user input quoted so `sysext OR` cannot
+  break `MATCH`) and `al0g top` (window computed in-query, so `--since 3d`
+  works; `--security` filter).
+- `is_security` is derived in the index from stored labels plus the registry's
+  `security_labels`, not stored on the record: a stored flag could never
+  backfill records collected before it existed.
+- `sync` prints store and `.git` size, so growth is visible per run.
+
+→ 6 feeds, 134 blog items, idempotent at `new 0`. 80 items flagged security,
+from `security` / `Security` labels on Flatcar advisories.
+
+**Remaining in Phase 2:** `structured/*` (Flatcar release components,
+Bottlerocket CHANGELOG, Amazon Linux HTML notes) and `gitlab.py`.
+
 ### Phase 3 — Comments + signal + search
 - Comment records from GitHub and GitLab
 - `signal` frozen fields

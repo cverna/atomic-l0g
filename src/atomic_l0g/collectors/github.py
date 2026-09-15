@@ -31,7 +31,9 @@ log = logging.getLogger("atomic_l0g.github")
 TIER_ORDER = {"release-only": 0, "watch": 1, "core": 2}
 
 #: Hard ceilings so one huge repository cannot consume the whole API budget.
-_MAX_RELEASE_PAGES = 2
+#: Release pages are counted in 50s (see RELEASE_PAGE_SIZE), so 4 pages keeps
+#: the previous 200-release history depth at a page size GitHub will serve.
+_MAX_RELEASE_PAGES = 4
 _MAX_ISSUE_PAGES = 5
 _MAX_PULL_PAGES = 5
 _MAX_COMMENT_PAGES = 3
@@ -103,7 +105,9 @@ def _release(repo: str, distro: str, raw: dict[str, Any], observed: str) -> Rele
     )
 
 
-def _issue(repo: str, distro: str, raw: dict[str, Any], observed: str) -> Item:
+def _issue(
+    repo: str, distro: str, raw: dict[str, Any], observed: str
+) -> Item:
     number = raw["number"]
     return Item(
         id=f"github:{repo}:issue:{number}",
@@ -124,7 +128,9 @@ def _issue(repo: str, distro: str, raw: dict[str, Any], observed: str) -> Item:
     )
 
 
-def _pull(repo: str, distro: str, raw: dict[str, Any], observed: str) -> Item:
+def _pull(
+    repo: str, distro: str, raw: dict[str, Any], observed: str
+) -> Item:
     number = raw["number"]
     merged = raw.get("merged_at")
     return Item(

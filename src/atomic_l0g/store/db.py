@@ -28,6 +28,11 @@ DROP TABLE IF EXISTS items_fts;
 DROP TABLE IF EXISTS items;
 DROP TABLE IF EXISTS comments;
 DROP TABLE IF EXISTS releases;
+DROP TABLE IF EXISTS security_labels;
+
+CREATE TABLE security_labels (
+    label TEXT PRIMARY KEY
+);
 
 CREATE TABLE items (
     id           TEXT PRIMARY KEY,
@@ -102,6 +107,16 @@ SELECT
     i.created_at,
     i.updated_at,
     i.last_changed,
+    json_extract(i.data, '$.signal.comments') AS comments,
+    json_extract(i.data, '$.signal.reactions') AS reactions,
+    -- Derived from the stored labels and the registry's security_labels, not
+    -- stored on the record.  A stored flag could never backfill: records
+    -- collected before it existed would lack it for good.
+    EXISTS (
+        SELECT 1
+        FROM json_each(COALESCE(i.labels, '[]')) AS j
+        JOIN security_labels s ON lower(j.value) = lower(s.label)
+    ) AS is_security,
     (
         SELECT COUNT(*) FROM comments c
         WHERE c.parent_id = i.id
@@ -136,8 +151,17 @@ def partition(
     return items, comments, releases
 
 
-def build(db_path: Path, store: JsonlStore) -> dict[str, int]:
-    """Rebuild the SQLite index from the JSONL store."""
+def build(
+    db_path: Path,
+    store: JsonlStore,
+    security_labels: Iterable[str] = (),
+) -> dict[str, int]:
+    """Rebuild the SQLite index from the JSONL store.
+
+    ``security_labels`` comes from the registry; it is seeded into a table so
+    that ``is_security`` can be derived for every record, including ones
+    collected before the label list was configured.
+    """
     items, comments, releases = partition(store.read_all())
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,6 +173,11 @@ def build(db_path: Path, store: JsonlStore) -> dict[str, int]:
     connection = sqlite3.connect(db_path)
     try:
         connection.executescript(SCHEMA)
+
+        connection.executemany(
+            "INSERT OR IGNORE INTO security_labels (label) VALUES (?)",
+            [(label,) for label in security_labels],
+        )
 
         connection.executemany(
             """
