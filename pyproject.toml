@@ -22,12 +22,7 @@ dependencies = [
     "feedparser>=6.0",
     "typer>=0.12",
     "pyyaml>=6.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "respx>=0.21",
+    "pydantic-settings>=2.6",
 ]
 
 [project.scripts]
@@ -36,7 +31,3 @@ al0g = "atomic_l0g.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/atomic_l0g"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"

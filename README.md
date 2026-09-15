@@ -20,8 +20,10 @@ Separate **fetching** from **analysis**.
 
 ## Status
 
-Phase 0 — scaffold. The registry, data model and validation are in place; collectors
-are not yet implemented. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+Phases 0 and 1 are done: registry, data model, GitHub collector, append-only
+JSONL store, SQLite index and the `sync` / `list` / `show` / `fetch` commands.
+Feed, structured and GitLab collectors are next. See
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 ## Development
 
@@ -29,27 +31,35 @@ are not yet implemented. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install -e .
 ```
 
 Then:
 
 ```bash
-al0g sources validate     # lint the registry
-al0g sources list         # list watched projects
-pytest
+al0g sources validate              # lint the registry
+al0g sources list                  # list watched projects
+al0g sync --distro flatcar         # collect
+al0g list --since 7d               # read from the index
+al0g fetch <id> --diff             # reach past the store on demand
 ```
+
+Verify end to end by running `al0g sync --distro flatcar` twice: the second run
+must report `new 0`.
 
 ## Configuration
 
-Collection needs read-only API tokens:
+Collection needs read-only API tokens, read from `/run/secrets` or the
+environment:
 
-| Variable | Purpose |
-|---|---|
-| `GITHUB_TOKEN` | GitHub REST (required — unauthenticated is 60 req/hr) |
-| `GITLAB_TOKEN` | GitLab REST v4 with the `read_api` scope |
+| File | Environment variable | Purpose |
+|---|---|---|
+| `/run/secrets/github-token` | `GITHUB_TOKEN` | GitHub REST (required — unauthenticated is 60 req/hr) |
+| `/run/secrets/gitlab-token` | `GITLAB_TOKEN` | GitLab REST v4, `read_api` scope |
+| `/run/secrets/gitea-token` | `GITEA_TOKEN` | Gitea / forge.fedoraproject.org |
 
-Tokens are read from the environment and are never written to the store.
+Secret values are never logged and never written to the store. Non-secret
+settings are overridable with an `ATOMIC_L0G_` prefix, e.g. `ATOMIC_L0G_DATA_DIR`.
 
 ## Layout
 

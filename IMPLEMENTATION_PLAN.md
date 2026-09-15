@@ -36,11 +36,13 @@ does the first half so the agent can do the second half off local data.
 | Interface | CLI first, MCP server in Phase 5 |
 | Storage | Git-committed JSONL + derived SQLite |
 | Detail depth | Metadata + bodies + comments. **No diffs** — fetched on demand |
-| GitHub access | REST + PAT (`GITHUB_TOKEN`) |
-| GitLab access | REST v4 + PAT (`GITLAB_TOKEN`) |
+| GitHub access | REST + PAT (`/run/secrets/github-token` or `GITHUB_TOKEN`) |
+| GitLab access | REST v4 + PAT (`/run/secrets/gitlab-token` or `GITLAB_TOKEN`) |
+| Secrets | `pydantic-settings` reading `/run/secrets` or the environment (§9.1) |
 | Collection | Manual now, scheduled CI later |
 | Triage fields | `title` / `summary` / `body` — passthrough whatever the source has |
 | Ranking | Frozen `signal` (comments, reactions, labels) + window-relative SQL view |
+| Verification | Run it live against the real APIs. No unit tests, by choice (§12) |
 
 ---
 
@@ -289,13 +291,17 @@ visible rather than accumulating as a quiet gap.
 
 | Path | Committed | Purpose |
 |---|---|---|
-| `data/normalized/<YYYY-MM>.jsonl` | yes | append-only items + comments |
-| `data/releases/*.json` | yes | normalised release records |
-| `data/cursors/*.json` | yes | per-collector incremental state |
+| `data/normalized/<YYYY-MM>.jsonl` | yes | items, comments **and releases**, interleaved |
+| `data/cursors/*.json` | yes | per-repository incremental state |
 | `data/annotations/*.jsonl` | yes | agent-generated summaries, keyed by item id |
 | `data/atomic-l0g.db` | **no** | SQLite, rebuilt from JSONL |
 | `reports/` | yes | generated digests |
 | `cache/` | **no** | raw payloads, debug dumps |
+
+One JSONL stream carries all three record kinds; they are told apart by shape
+(`item_kind` → item, `parent_id` → comment, otherwise release) and split into
+tables at materialisation time. Keeping one stream means one append path, one
+dedup rule and one revision rule.
 
 **Facts and interpretation stay separate.** The normalised store holds only collected
 facts. An agent's better summary ("ACL is now a Flatcar fork — strategic for RHEL Image
@@ -348,20 +354,51 @@ python -m pip install -e ".[dev]"
 
 | Dep | Why |
 |---|---|
-| `httpx` | HTTP for all collectors (sync + async-friendly) |
+| `httpx` | HTTP for all collectors |
 | `feedparser` | RSS/Atom parsing |
 | `typer` | CLI ergonomics |
+| `pyyaml` | the declarative registry |
+| `pydantic-settings` | typed config, and secret loading from files |
 
-Dev extras: `pytest`, `respx` (httpx mocking for collector tests).
-
-Stdlib covers the rest: `sqlite3`, `json`, `hashlib`, `datetime`, `argparse`-level plumbing.
+Stdlib covers the rest: `sqlite3`, `json`, `hashlib`, `datetime`.
 
 **Conventions**
 - `.venv/` is gitignored, never committed.
 - `python -m pip` inside the venv, always.
-- Tokens via environment: `GITHUB_TOKEN`, `GITLAB_TOKEN`. A gitignored `.env` may hold
-  them locally; nothing secret is ever committed.
-- Optional config file `~/.config/atomic-l0g/config.toml` for per-user overrides.
+- Nothing secret is ever committed, logged or written to the store.
+
+### 9.1 Secrets
+
+Tokens are read from files in `/run/secrets` (the Podman/Docker convention) or
+from environment variables; environment variables win, which is what CI wants.
+
+```
+/run/secrets/github-token   ->  Secrets().github_token
+/run/secrets/gitlab-token   ->  Secrets().gitlab_token
+/run/secrets/gitea-token    ->  Secrets().gitea_token
+```
+
+The wrinkle: the mounted files are dash-named, while a Python field must be
+`github_token`. `pydantic-settings` maps field names to file names, so a plain
+field silently finds nothing. Setting a `validation_alias` alongside
+`populate_by_name` makes the source emit **both** `github-token` and
+`github_token` as lookup candidates — the dash-named file is found and
+`GITHUB_TOKEN` keeps working:
+
+```python
+class Secrets(BaseSettings):
+    model_config = SettingsConfigDict(
+        secrets_dir=SECRETS_DIR, case_sensitive=False, populate_by_name=True
+    )
+    github_token: str | None = Field(default=None, validation_alias="github-token")
+```
+
+`Secrets.require("github_token")` raises `SecretMissing` naming both the expected
+file and the environment variable, so a missing token surfaces immediately
+rather than as a confusing 403 several calls later.
+
+Non-secret configuration uses the same mechanism with an `ATOMIC_L0G_` prefix,
+e.g. `ATOMIC_L0G_DATA_DIR`.
 
 ---
 
@@ -415,7 +452,7 @@ atomic-l0g/
 
 ## 11. Phases
 
-### Phase 0 — Scaffold
+### Phase 0 — Scaffold  ✅ done
 - `git init`, `pyproject.toml`, `.venv`, `.gitignore`, package skeleton
 - `model.py` with `Item` / `Comment` / `Release` + serialisation
 - `registry.py` with schema validation
@@ -423,18 +460,27 @@ atomic-l0g/
 - `al0g sources validate` implemented
 
 **Done when:** `al0g sources validate` passes on the registry and models round-trip a fixture.
+→ 14 projects, 41 repositories.
 
-### Phase 1 — Vertical slice (critical path)
-Flatcar + Bottlerocket only, every layer exercised:
-- `collectors/github.py` (releases, issues, PRs)
-- `store/jsonl.py` with dedup + revision via `content_hash`
-- `store/db.py` materialisation
-- CLI: `sync`, `list`, `show`, `fetch --diff`
+### Phase 1 — Vertical slice  ✅ done
+Flatcar + Bottlerocket through every layer:
+- `settings.py` -- pydantic-settings config + `/run/secrets` loading
+- `http.py` -- authenticated clients, pagination, rate-limit guard
+- `collectors/base.py` -- `Cursor`, `SyncResult`, window + bot helpers
+- `collectors/github.py` -- releases, issues, PRs, comments, review comments
+- `store/jsonl.py` -- append-only store, dedup, revision tracking
+- `store/db.py` -- SQLite materialisation, FTS5, `v_item_signal`
+- `sync.py` -- orchestration with per-repository isolation
+- CLI: `sync`, `list`, `show`, `fetch --diff`, `db build`
 
-**Done when:** two consecutive `al0g sync` runs produce **zero** duplicate rows; a known
-Flatcar release appears with kernel/systemd populated; `al0g fetch <id> --diff` returns a
-live diff. The schema is now validated against real data before breadth makes it
-expensive to change.
+**Done when:** two consecutive syncs produce zero new rows; `fetch --diff` returns a live
+diff.
+→ Flatcar 4 repos: 274 records in 31s. Bottlerocket 5 repos: 247 records in 16s.
+→ Second Flatcar run: `new 0, unchanged 32`. `fetch --diff` returned a live diff.
+
+**Not yet done here:** release *components* (kernel/systemd versions) come from
+Flatcar's `releases.json`, which is a Phase 2 structured collector. Phase 1
+releases come from the GitHub releases API and carry notes but no components.
 
 ### Phase 2 — Breadth
 - `feed.py`, `structured/{flatcar,bottlerocket,amazonlinux}.py`
@@ -481,18 +527,24 @@ the store is fresh.
 
 ---
 
-## 12. Testing
+## 12. Verification
 
-| Layer | Approach |
+There are no unit tests, by choice. Two reasons: the collectors are thin
+passthrough over HTTP, so a mocked response mostly tests the mock; and the
+properties that actually matter are end-to-end and cheap to observe directly.
+
+Verification is therefore running it live, with two criteria that *are* treated
+as non-negotiable:
+
+| Property | How it is checked |
 |---|---|
-| Model / registry | Unit tests, fixture round-trips, invalid registry must fail |
-| Collectors | `respx` mocks over recorded fixtures; no live network in CI |
-| Dedup / revision | Re-sync a fixture twice → assert zero new rows; edit a field → assert a revision |
-| SQLite views | Build from a fixture JSONL, assert `comments_7d` correctness |
-| CLI | `typer.testing.CliRunner` golden tests |
+| **Idempotency** | `al0g sync` twice in a row must report `new 0`. This is the load-bearing property of the whole store — if it fails, the JSONL grows without bound and every downstream count is wrong. |
+| **Isolation** | A failing repository records an error and the run continues; one broken source never aborts a sync. |
+| **Resumability** | Running out of API budget stops cleanly with everything collected so far persisted and the cursor still valid. |
+| **Triage invariant** | `sync` reports the count of records with neither title nor summary; it should be zero. |
 
-Acceptance criteria above are all assertable, so Phases 1–3 become regression tests
-rather than manual checks.
+The `sources validate` command retains strict schema checks for the registry,
+which is where genuinely silent failure lives.
 
 ---
 

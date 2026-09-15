@@ -22,7 +22,15 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any
 
-__all__ = ["ITEM_KINDS", "Comment", "Item", "Release", "utcnow"]
+__all__ = [
+    "ITEM_KINDS",
+    "STORE_MANAGED_FIELDS",
+    "Comment",
+    "Item",
+    "Release",
+    "record_hash",
+    "utcnow",
+]
 
 #: Recognised item kinds.
 ITEM_KINDS = frozenset(
@@ -38,11 +46,11 @@ ITEM_KINDS = frozenset(
     }
 )
 
-#: Fields that define an item's identity for change detection.  Store-managed
-#: timestamps (``observed_at``, ``first_seen``, ``last_changed``) are excluded
-#: on purpose so that re-collecting an unchanged item can never look like a
-#: change.
-_HASH_FIELDS = ("title", "summary", "body", "state", "labels", "version", "updated_at")
+#: Fields the store owns.  Excluded from :func:`record_hash` so that
+#: re-collecting an unchanged record can never look like a change.
+STORE_MANAGED_FIELDS = frozenset(
+    {"observed_at", "first_seen", "last_changed", "content_hash"}
+)
 
 
 def utcnow() -> str:
@@ -53,6 +61,22 @@ def utcnow() -> str:
         .isoformat()
         .replace("+00:00", "Z")
     )
+
+
+def record_hash(record: dict[str, Any]) -> str:
+    """Hash the source-owned fields of a record.
+
+    Used for revision detection: the same item re-collected unchanged produces
+    the same hash, so the store appends nothing.
+    """
+    payload = {
+        key: value
+        for key, value in record.items()
+        if key not in STORE_MANAGED_FIELDS
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
 
 
 def _prune(data: dict[str, Any]) -> dict[str, Any]:
@@ -109,14 +133,9 @@ class Item:
         """
         return bool((self.title or "").strip() or (self.summary or "").strip())
 
-    def compute_content_hash(self) -> str:
-        """Hash the fields that define this item's identity."""
-        payload = {name: getattr(self, name) for name in _HASH_FIELDS}
-        blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-        return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
-
     def to_dict(self) -> dict[str, Any]:
         return _prune(asdict(self))
+
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Item:
