@@ -9,6 +9,11 @@ Records are partitioned by shape, since all three kinds share one JSONL file:
 * ``item_kind`` present -> item
 * ``parent_id`` present -> comment
 * otherwise             -> release
+
+The repository a record belongs to is **derived here**, from its id, rather
+than stored on the record.  Adding a field to the model would change every
+content hash and make the entire store look revised on the next sync; a derived
+column costs nothing and can be rebuilt at will.
 """
 
 from __future__ import annotations
@@ -20,7 +25,44 @@ from typing import Any, Iterable
 
 from atomic_l0g.store.jsonl import JsonlStore
 
-__all__ = ["build", "partition"]
+__all__ = ["SCHEMA_VERSION", "build", "partition", "schema_version"]
+
+#: Bumped whenever the table layout changes.  The index is derived, so a
+#: mismatch only means "rebuild" -- but it has to be *detected*: adding a column
+#: does not touch the JSONL, so the normal staleness check would miss it and
+#: leave a stale index serving queries that expect the new shape.
+SCHEMA_VERSION = 2
+
+
+def _repo_of(record: dict[str, Any]) -> str | None:
+    """Derive which repository a record belongs to, from its id.
+
+    ``github:owner/repo:kind:number`` -> ``owner/repo``
+    ``feed:project:label:hash``       -> ``project:label``
+    """
+    parts = str(record.get("id", "")).split(":")
+    if len(parts) < 4:
+        return None
+    if parts[0] == "feed":
+        return f"{parts[1]}:{parts[2]}"
+    return parts[1]
+
+
+def schema_version(db_path: Path) -> int:
+    """Read the schema version recorded in an index, or 0 if there is none."""
+    if not db_path.is_file():
+        return 0
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return 0
+    try:
+        return int(connection.execute("PRAGMA user_version").fetchone()[0])
+    except sqlite3.Error:
+        return 0
+    finally:
+        connection.close()
+
 
 SCHEMA = """
 DROP VIEW IF EXISTS v_item_signal;
@@ -37,6 +79,7 @@ CREATE TABLE security_labels (
 CREATE TABLE items (
     id           TEXT PRIMARY KEY,
     distro       TEXT,
+    repo         TEXT,
     provider     TEXT,
     item_kind    TEXT,
     title        TEXT,
@@ -54,6 +97,7 @@ CREATE TABLE items (
 );
 
 CREATE INDEX idx_items_distro ON items(distro);
+CREATE INDEX idx_items_repo ON items(repo);
 CREATE INDEX idx_items_kind ON items(item_kind);
 CREATE INDEX idx_items_updated ON items(updated_at);
 
@@ -74,6 +118,7 @@ CREATE INDEX idx_comments_created ON comments(created_at);
 CREATE TABLE releases (
     id           TEXT PRIMARY KEY,
     distro       TEXT,
+    repo         TEXT,
     version      TEXT,
     channel      TEXT,
     release_date TEXT,
@@ -83,6 +128,7 @@ CREATE TABLE releases (
 );
 
 CREATE INDEX idx_releases_distro ON releases(distro);
+CREATE INDEX idx_releases_repo ON releases(repo);
 CREATE INDEX idx_releases_date ON releases(release_date);
 
 CREATE VIRTUAL TABLE items_fts USING fts5(
@@ -173,6 +219,7 @@ def build(
     connection = sqlite3.connect(db_path)
     try:
         connection.executescript(SCHEMA)
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
         connection.executemany(
             "INSERT OR IGNORE INTO security_labels (label) VALUES (?)",
@@ -181,10 +228,10 @@ def build(
 
         connection.executemany(
             """
-            INSERT INTO items (id, distro, provider, item_kind, title, summary, url,
+            INSERT INTO items (id, distro, repo, provider, item_kind, title, summary, url,
                                author, state, created_at, updated_at, first_seen,
                                last_changed, version, labels, data)
-            VALUES (:id, :distro, :provider, :item_kind, :title, :summary, :url,
+            VALUES (:id, :distro, :repo, :provider, :item_kind, :title, :summary, :url,
                     :author, :state, :created_at, :updated_at, :first_seen,
                     :last_changed, :version, :labels, :data)
             """,
@@ -192,6 +239,7 @@ def build(
                 {
                     "id": r["id"],
                     "distro": r.get("distro"),
+                    "repo": _repo_of(r),
                     "provider": r.get("provider"),
                     "item_kind": r.get("item_kind"),
                     "title": r.get("title"),
@@ -235,13 +283,14 @@ def build(
 
         connection.executemany(
             """
-            INSERT INTO releases (id, distro, version, channel, release_date, notes, url, data)
-            VALUES (:id, :distro, :version, :channel, :release_date, :notes, :url, :data)
+            INSERT INTO releases (id, distro, repo, version, channel, release_date, notes, url, data)
+            VALUES (:id, :distro, :repo, :version, :channel, :release_date, :notes, :url, :data)
             """,
             [
                 {
                     "id": r["id"],
                     "distro": r.get("distro"),
+                    "repo": _repo_of(r),
                     "version": r.get("version"),
                     "channel": r.get("channel"),
                     "release_date": r.get("release_date"),

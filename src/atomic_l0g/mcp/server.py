@@ -157,22 +157,38 @@ def build_server() -> MCPServer:
         name="ecosystem_stats",
         annotations=READ_ONLY,
         description=(
-            "Per-project activity over a window: how many items were created, "
-            "how many were touched, how much discussion, how many releases. "
+            "Activity counts over a window: how many items were created, how "
+            "many were touched, how much discussion, how many releases. "
             "Start here to see who is busy and who is shipping. "
             "NEW counts items created inside the window; ACTIVE counts items "
             "updated inside it -- the difference between a project generating "
             "work and one still arguing about old work. "
+            "Set by='repo' for a per-repository breakdown, which is where the "
+            "work actually is: a project total hides one busy repository "
+            "behind nine quiet ones. "
+            "Returns {since, window, by, groups}, each group carrying its own "
+            "key ('distro' or 'repo') plus new, active, comments and releases. "
             "Comment counts exist only for core-tier projects (Flatcar, "
             "Bottlerocket, Azure Linux, Amazon Linux, CoreOS, RHCOS)."
         ),
     )
     def ecosystem_stats(
         since: str = "7d",
+        by: str = "distro",
         distro: Optional[list[str]] = None,
     ) -> dict[str, Any]:
-        """Activity counts by project. `since` accepts 24h, 7d, 30d, 90d."""
-        return _run(["stats", "--since", since, *_repeat("--distro", distro), "--json"])
+        """Activity counts by project, or per repository with by='repo'."""
+        return _run(
+            [
+                "stats",
+                "--since",
+                since,
+                "--by",
+                by,
+                *_repeat("--distro", distro),
+                "--json",
+            ]
+        )
 
     @server.tool(
         name="ecosystem_top",

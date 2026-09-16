@@ -100,7 +100,14 @@ def _ensure_index(settings: Settings) -> None:
         (path.stat().st_mtime for path in settings.normalized_dir.glob("*.jsonl")),
         default=0.0,
     )
-    if settings.db_path.is_file() and settings.db_path.stat().st_mtime >= newest:
+    fresh = (
+        settings.db_path.is_file()
+        and settings.db_path.stat().st_mtime >= newest
+        # A schema change does not touch the JSONL, so mtime alone would leave a
+        # stale index in place and quietly serve queries the new shape expects.
+        and db_store.schema_version(settings.db_path) == db_store.SCHEMA_VERSION
+    )
+    if fresh:
         return
 
     try:
@@ -557,21 +564,36 @@ def list_items(
 @app.command()
 def stats(
     window: Optional[str] = typer.Option(None, "--since", help="Activity window, default 7d."),
+    by: str = typer.Option("distro", "--by", help="Group by 'distro' (default) or 'repo'."),
     distro: Optional[list[str]] = typer.Option(None, "--distro", "-d", help="Filter by project."),
     kind: Optional[list[str]] = typer.Option(None, "--kind", "-k", help="Filter by item kind."),
     security: bool = typer.Option(False, "--security", help="Only security-labelled items."),
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
-    """Per-project counts over a window: new, active, comments and releases.
+    """Counts over a window: new, active, comments and releases.
 
     NEW counts items created in the window; ACTIVE counts items updated in it.
-    Keeping them apart is the difference between "this project is generating
-    work" and "this project is still arguing about old work".
+    Keeping them apart is the difference between a project generating work and
+    one still arguing about old work.
+
+    ``--by repo`` exists because project totals hide where the work actually
+    is: one busy repository and nine quiet ones look the same once summed.
     """
+    if by not in ("distro", "repo"):
+        typer.secho(
+            f"error: --by must be 'distro' or 'repo', not {by!r}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
     settings = Settings()
     connection = _connect(settings)
 
     since = _window_start(window, settings.default_window)
+
+    group_col = "i.distro" if by == "distro" else "COALESCE(i.repo, '(unattributed)')"
+    release_group = "r.distro" if by == "distro" else "COALESCE(r.repo, '(unattributed)')"
 
     where = ["1 = 1"]
     filters: list[object] = []
@@ -589,33 +611,32 @@ def stats(
 
     def bucket(name: str) -> dict[str, object]:
         return totals.setdefault(
-            name,
-            {"distro": name, "new": 0, "active": 0, "comments": 0, "releases": 0},
+            name, {by: name, "new": 0, "active": 0, "comments": 0, "releases": 0}
         )
 
     items_sql = f"""
-        SELECT i.distro,
+        SELECT {group_col} AS grp,
                SUM(CASE WHEN i.created_at >= ? THEN 1 ELSE 0 END) AS new_items,
                SUM(CASE WHEN COALESCE(i.updated_at, i.created_at) >= ? THEN 1 ELSE 0 END)
                    AS active_items
         FROM items i
         WHERE {clause}
-        GROUP BY i.distro
+        GROUP BY grp
     """
     for row in connection.execute(items_sql, [since, since, *filters]):
-        entry = bucket(row["distro"])
+        entry = bucket(row["grp"])
         entry["new"] = row["new_items"] or 0
         entry["active"] = row["active_items"] or 0
 
     comments_sql = f"""
-        SELECT i.distro, COUNT(*) AS n
+        SELECT {group_col} AS grp, COUNT(*) AS n
         FROM comments c
         JOIN items i ON i.id = c.parent_id
         WHERE c.created_at >= ? AND {clause}
-        GROUP BY i.distro
+        GROUP BY grp
     """
     for row in connection.execute(comments_sql, [since, *filters]):
-        bucket(row["distro"])["comments"] = row["n"]
+        bucket(row["grp"])["comments"] = row["n"]
 
     # Releases carry no labels, so security cannot apply to them; and a
     # --kind filter that excludes releases should exclude them here too.
@@ -626,22 +647,26 @@ def stats(
             release_where.append(_in_clause("r.distro", distro))
             release_params.extend(distro)
         releases_sql = (
-            "SELECT r.distro, COUNT(*) AS n FROM releases r "
-            f"WHERE {' AND '.join(release_where)} GROUP BY r.distro"
+            f"SELECT {release_group} AS grp, COUNT(*) AS n FROM releases r "
+            f"WHERE {' AND '.join(release_where)} GROUP BY grp"
         )
         for row in connection.execute(releases_sql, release_params):
-            bucket(row["distro"])["releases"] = row["n"]
+            bucket(row["grp"])["releases"] = row["n"]
 
     ordered = sorted(
         totals.values(),
-        key=lambda entry: (-entry["active"], -entry["releases"], entry["distro"]),
+        key=lambda entry: (-entry["active"], -entry["releases"], str(entry[by])),
     )
 
     if as_json:
         typer.echo(
             jsonlib.dumps(
-                {"since": since, "window": window or settings.default_window,
-                 "projects": ordered},
+                {
+                    "since": since,
+                    "window": window or settings.default_window,
+                    "by": by,
+                    "groups": ordered,
+                },
                 indent=2,
                 ensure_ascii=False,
             )
@@ -652,17 +677,26 @@ def stats(
         typer.secho(f"nothing active since {since}", fg=typer.colors.YELLOW)
         return
 
-    typer.secho(f"window: {window or settings.default_window} (since {since})\n", fg=typer.colors.BLUE)
-    typer.secho(f"{'DISTRO':<24} {'NEW':>5} {'ACTIVE':>7} {'CMTS':>6} {'RELS':>6}", bold=True)
+    width = 46 if by == "repo" else 24
+    noun = "repositories" if by == "repo" else "projects"
+
+    typer.secho(
+        f"window: {window or settings.default_window} (since {since})\n",
+        fg=typer.colors.BLUE,
+    )
+    typer.secho(
+        f"{by.upper():<{width}} {'NEW':>5} {'ACTIVE':>7} {'CMTS':>6} {'RELS':>6}",
+        bold=True,
+    )
     for entry in ordered:
         typer.echo(
-            f"{entry['distro']:<24} {entry['new']:>5} {entry['active']:>7} "
+            f"{str(entry[by]):<{width}} {entry['new']:>5} {entry['active']:>7} "
             f"{entry['comments']:>6} {entry['releases']:>6}"
         )
 
     typer.echo()
     typer.secho(
-        f"{len(ordered)} projects | new {sum(e['new'] for e in ordered)} | "
+        f"{len(ordered)} {noun} | new {sum(e['new'] for e in ordered)} | "
         f"active {sum(e['active'] for e in ordered)} | "
         f"comments {sum(e['comments'] for e in ordered)} | "
         f"releases {sum(e['releases'] for e in ordered)}",

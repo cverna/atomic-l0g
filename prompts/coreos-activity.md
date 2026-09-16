@@ -25,6 +25,7 @@ what needs a decision; keep evidence one click away.
 Read commands. All accept `--json`; `--distro` and `--since` (24h, 7d, 30d):
 
     al0g stats    --distro coreos --distro rhcos --since 7d
+    al0g stats    --by repo --distro coreos --distro rhcos --since 7d
     al0g top      --distro coreos --distro rhcos --since 7d --limit 25
     al0g list     --distro coreos --distro rhcos --kind pr --state merged --since 7d
     al0g list     --distro coreos --distro rhcos --kind issue --since 7d
