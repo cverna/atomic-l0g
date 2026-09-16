@@ -234,10 +234,15 @@ def sync(
                         effective_since = backfill_since
                     else:
                         effective_since = cursor_since or since
-                        # An explicit --since that the cursor then overrides is
-                        # worth saying out loud: silently collecting nothing is
-                        # the kind of thing that reads as "no activity".
-                        if cursor_since and requested_window:
+                        # Warn only when the requested window differs from the
+                        # default. A daily run passes the default explicitly, so
+                        # printing this every day would train the reader to
+                        # ignore the one time it matters.
+                        if (
+                            cursor_since
+                            and requested_window
+                            and requested_window != settings.default_window
+                        ):
                             report.window_overridden += 1
 
                     result = collect_repo(

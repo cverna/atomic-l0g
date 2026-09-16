@@ -23,6 +23,19 @@ Paths used throughout:
 The store lives in `/var/lib`, **not** inside the checkout, so the daily run
 never dirties the git working tree. Git stays the code repo, not the data repo.
 
+### Why these paths
+
+The units assume `/opt/atomic-l0g` and a dedicated `atomic-l0g` service user.
+The alternative — checkout in a home directory, running as that user — sets up
+faster and works fine, but it means the process reachable from the internet
+runs as an account with a shell and usually an SSH key.
+
+If you take the home-directory route anyway, change **four** things in *both*
+units: `User`/`Group`, `Documentation`, `ExecStart`, and
+`ATOMIC_L0G_DATA_DIR`. That last one is the easy one to miss — the built-in
+default resolves relative to the installed package, not to your checkout, so
+leaving it unset silently reads a different store than you expect.
+
 ---
 
 ## 1. Service user
@@ -38,6 +51,7 @@ Copy the tree **without** the venv, `.git` and the derived index:
 ```bash
 sudo mkdir -p /opt/atomic-l0g
 sudo rsync -a --exclude '.venv/' --exclude '.git/' --exclude 'data/' \
+  --exclude '__pycache__/' --exclude '*.pyc' \
   ./ /opt/atomic-l0g/
 sudo chown -R atomic-l0g: /opt/atomic-l0g
 ```
@@ -161,7 +175,8 @@ cursor wins, and the CLI says so rather than collecting nothing quietly.
 ## Upgrading
 
 ```bash
-sudo rsync -a --exclude '.venv/' --exclude '.git/' --exclude 'data/' ./ /opt/atomic-l0g/
+sudo rsync -a --exclude '.venv/' --exclude '.git/' --exclude 'data/' \
+  --exclude '__pycache__/' --exclude '*.pyc' ./ /opt/atomic-l0g/
 sudo chown -R atomic-l0g: /opt/atomic-l0g
 sudo -u atomic-l0g /opt/atomic-l0g/.venv/bin/python -m pip install -e '/opt/atomic-l0g[mcp]'
 sudo systemctl restart atomic-l0g-mcp.service
@@ -204,6 +219,7 @@ credentials or `LoadCredential=` rather than a world-readable-ish env file.
 | Ingest exits 1, "missing secret" | Token absent or expired. This is deliberate: an unattended run must not report success while collecting nothing. |
 | Service can't read the store | SELinux. `sudo ausearch -m avc -ts recent`, then `sudo restorecon -Rv /var/lib/atomic-l0g`. |
 | `part` in the ingest summary | One phase failed but the rest of the repository was collected. The reason is printed under the row. |
+| `kairos-io/kairos` reports `part` on releases, repeatedly | GitHub intermittently 504s or drops that repository's releases endpoint. Confirmed transient rather than payload size: the identical request succeeds minutes later at `per_page=50`. Shrinking the page would cost release history for no reliable gain, so the retry plus phase isolation is the fix — the cost is that repo's releases alone. |
 
 A useful check when a project looks quiet:
 

@@ -17,6 +17,10 @@ Group=atomic-l0g
 # makes a public endpoint defensible here. Do not add a token to this unit.
 Environment=ATOMIC_L0G_DATA_DIR=/var/lib/atomic-l0g
 
+# Same reason as the ingest unit: unbuffered output means the journal shows
+# startup and per-request errors as they happen rather than at exit.
+Environment=PYTHONUNBUFFERED=1
+
 # The allow-list is exact-match or "host:*" -- there is no wildcard -- and an
 # unset list means localhost only. This must name how clients actually reach
 # the server, or every request is rejected with 421 and no explanation.

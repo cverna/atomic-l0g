@@ -16,4 +16,9 @@ EnvironmentFile=-/etc/atomic-l0g/env
 
 Environment=ATOMIC_L0G_DATA_DIR=/var/lib/atomic-l0g
 
+# Without this, Python block-buffers stdout when it is not a terminal, so a
+# journalctl -f shows nothing until the run finishes -- and a run that hangs
+# shows nothing at all, which is when you most want to see where it is.
+Environment=PYTHONUNBUFFERED=1
+
 ExecStart=/opt/atomic-l0g/scripts/daily-ingest.sh
