@@ -47,7 +47,9 @@ Produce this week's ecosystem digest for the CoreOS team lead.
 1. **What shipped.** Releases and merged PRs across competitors, and what each
    means for image-mode Linux — not just that it happened.
 2. **Where the arguments are.** The most active discussions and what each is
-   actually about.
+   actually about. Read the comments for the threads you rank rather than
+   inferring from titles — a high comment count is often CI re-triggers, and
+   only the bodies tell you which.
 3. **Competitor strategy.** Where each project is heading. Watch for bootc,
    UKI, sysext, composefs, update mechanisms and enterprise positioning.
 4. **Security posture.** What is being patched, by whom, and how fast.

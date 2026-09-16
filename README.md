@@ -46,6 +46,7 @@ al0g top --since 7d                # rank by recent discussion activity
 al0g releases --since 90d          # release timeline + cadence
 al0g list --kind pr --state merged # what merged, by kind and state
 al0g search sysext                 # full-text search
+al0g comments <id> --since 7d        # stored comments: the argument behind a count
 al0g fetch <id> --diff             # reach past the store on demand
 ```
 
@@ -89,10 +90,16 @@ ATOMIC_L0G_ALLOWED_HOSTS="al0g-mcp.apps.example.com" \
 
 Exposed tools are read-only: `ecosystem_stats`, `ecosystem_top`,
 `ecosystem_list`, `ecosystem_releases`, `ecosystem_search`, `ecosystem_show`,
-`ecosystem_sources`. **`sync` and `fetch` deliberately have no tool** — `sync`
-writes to the source of truth, and `fetch` would spend whatever credentials the
-process holds. Result sets are capped (200, or 100 for search) and requests are
-clamped rather than rejected, so an agent never has to retry to get an answer.
+`ecosystem_sources`, `ecosystem_comments`.
+
+**`sync` and `fetch` deliberately have no tool.** `sync` writes to the source of
+truth; `fetch` would spend whatever credentials the process holds.
+`ecosystem_comments` is the counter-example that shows the rule is about
+credentials rather than depth — it reads comments from the local store, so it
+needs no network and is safe alongside everything else.
+
+Result sets are capped (200, or 100 for search) and requests are clamped rather
+than rejected, so an agent never has to retry to get an answer.
 
 Host and Origin validation is on by default. The allow-list matching is exact
 or `host:*` — there is no wildcard — so a public deployment must set

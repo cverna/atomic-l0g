@@ -962,6 +962,87 @@ def top(
 
 
 @app.command()
+def comments(
+    item_id: str = typer.Argument(..., help="Record id, e.g. github:owner/repo:pr:1234"),
+    window: Optional[str] = typer.Option(
+        None, "--since", help="Only comments created within, e.g. 7d."
+    ),
+    limit: int = typer.Option(
+        50, "--limit", "-n", help="Maximum comments; the most recent are kept."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Print the stored comments on an item, oldest first.
+
+    Unlike ``fetch --comments``, this reads the local store: no network, no
+    credentials, and it returns exactly the comments the activity counts are
+    built from.  Bot-authored comments were already excluded at collection
+    time.  This is what turns a count into an understanding of the argument.
+    """
+    settings = Settings()
+    connection = _connect(settings)
+
+    if not connection.execute(
+        "SELECT 1 FROM items WHERE id = ?", (item_id,)
+    ).fetchone():
+        typer.secho(
+            f"no item with id {item_id!r}. Check the id; releases carry no comments, "
+            "and `al0g list` or `al0g top` will give you one.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    where = ["c.parent_id = ?"]
+    params: list[object] = [item_id]
+    if window:
+        where.append("c.created_at >= ?")
+        params.append(_window_start(window, settings.default_window))
+
+    # Take the most recent `limit`, then reverse: truncating a long thread
+    # should drop the oldest comments, not the ones being discussed now.
+    rows = [
+        dict(row)
+        for row in connection.execute(
+            f"""
+            SELECT c.id, c.author, c.created_at, c.body, c.is_review_comment
+            FROM comments c
+            WHERE {' AND '.join(where)}
+            ORDER BY c.created_at DESC
+            LIMIT ?
+            """,
+            [*params, limit],
+        )
+    ]
+    rows.reverse()
+
+    if as_json:
+        typer.echo(
+            jsonlib.dumps(
+                {"item_id": item_id, "count": len(rows), "comments": rows},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    if not rows:
+        typer.secho(
+            f"no stored comments on {item_id}"
+            + (" in that window" if window else "")
+            + " -- comment data exists only for core-tier projects",
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    for row in rows:
+        marker = " [review]" if row["is_review_comment"] else ""
+        typer.echo(f"--- @{row['author'] or '?'} ({(row['created_at'] or '')[:10]}){marker}")
+        typer.echo(row["body"] or "")
+        typer.echo()
+
+
+@app.command()
 def fetch(
     item_id: str = typer.Argument(..., help="Record id to reach past the store for."),
     diff: bool = typer.Option(False, "--diff", help="Print the live pull-request diff."),

@@ -363,10 +363,13 @@ when the store has moved on, so there is no build step to remember.
 | `ecosystem_search` | `al0g search --json` |
 | `ecosystem_show` | `al0g show --json` |
 | `ecosystem_sources` | `al0g sources show --json` |
+| `ecosystem_comments` | `al0g comments --json` |
 
 `sync` and `fetch` get no MCP tool. `sync` writes to the source of truth;
 `fetch` would spend the serving pod's credentials, and the serving pod is
-deliberately given none.
+deliberately given none. `ecosystem_comments` is the counter-example that shows
+the rule is about credentials rather than about depth: it reads comments from
+the local store, so it needs no network and is safe alongside everything else.
 
 **Interaction rule:** an agent talks to the CLI or MCP and nothing else. If a
 question needs a filter neither exposes, the answer is to add a command — not

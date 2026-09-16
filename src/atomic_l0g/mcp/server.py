@@ -30,6 +30,7 @@ from typing import Any, Optional
 
 try:
     from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
     from mcp.types import ToolAnnotations
     from starlette.requests import Request
     from starlette.responses import JSONResponse
@@ -115,6 +116,12 @@ def _run(argv: list[str], timeout: float = DEFAULT_TIMEOUT) -> Any:
 
     The CLI writes its index-rebuild notice to stderr, so stdout stays pure
     JSON and nothing has to be stripped here.
+
+    Failures raise :class:`ToolError`, not a bare exception: the SDK treats a
+    deliberate ToolError as an is_error result carrying its message, whereas
+    anything else is treated as a crash and the message is withheld from the
+    client.  An agent that asked for a bad id should be told which id was bad,
+    not shown "Error executing tool".
     """
     command = [sys.executable, "-m", CLI_MODULE, *argv]
     try:
@@ -122,20 +129,25 @@ def _run(argv: list[str], timeout: float = DEFAULT_TIMEOUT) -> Any:
             command, capture_output=True, text=True, timeout=timeout, check=False
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(
+        raise ToolError(
             f"atomic-l0g {' '.join(argv)} timed out after {timeout:.0f}s"
         ) from exc
 
     if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "no output").strip()
-        raise RuntimeError(
-            f"atomic-l0g {' '.join(argv)} exited {completed.returncode}: {detail}"
-        )
+        # The rebuild notice shares stderr with real errors; drop it so the
+        # message the agent sees is the reason, not bookkeeping.
+        lines = [
+            line
+            for line in (completed.stderr or completed.stdout or "").splitlines()
+            if line.strip() and not line.startswith("index rebuilt:")
+        ]
+        detail = " ".join(lines).strip() or "no output"
+        raise ToolError(detail)
 
     try:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(
+        raise ToolError(
             f"atomic-l0g {' '.join(argv)} returned non-JSON output"
         ) from exc
 
@@ -363,6 +375,46 @@ def build_server() -> MCPServer:
     def ecosystem_sources(project: str) -> dict[str, Any]:
         """One project's repositories and feeds with last-collected times."""
         return _run(["sources", "show", project, "--json"])
+
+    @server.tool(
+        name="ecosystem_comments",
+        annotations=READ_ONLY,
+        description=(
+            "Read the stored comments on one item, oldest first. This turns a "
+            "comment count into an understanding of what a discussion is "
+            "actually about: ecosystem_top and ecosystem_stats tell you which "
+            "threads are hot, this tells you what they say. Use it before "
+            "characterising an argument -- a thread with 27 comments may be "
+            "CI re-triggers rather than design debate, and the bodies are the "
+            "only way to know. "
+            "Reads the LOCAL STORE: no network access and no credentials, and "
+            "it returns exactly the comments the activity counts are built "
+            "from, with bot-authored comments already excluded. Safe to call "
+            "on a shared endpoint. "
+            "Comment data exists only for core-tier projects (Flatcar, "
+            "Bottlerocket, Azure Linux, Amazon Linux, CoreOS, RHCOS). A "
+            "watch-tier project returns nothing, which means 'not collected', "
+            "not 'no discussion'. "
+            "The item id comes from an ecosystem_top, ecosystem_list, "
+            "ecosystem_search or ecosystem_releases result."
+        ),
+    )
+    def ecosystem_comments(
+        item_id: str,
+        since: Optional[str] = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Stored comments on one item, oldest first."""
+        argv = [
+            "comments",
+            item_id,
+            "--limit",
+            str(_clamp(limit, MAX_LIMIT)),
+            "--json",
+        ]
+        if since:
+            argv += ["--since", since]
+        return _run(argv)
 
     return server
 

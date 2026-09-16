@@ -32,9 +32,15 @@ Read commands. All accept `--json`; `--distro` and `--since` (24h, 7d, 30d):
     al0g releases --distro coreos --since 30d
     al0g search   "<terms>" --distro coreos
     al0g show     <id>
+    al0g comments <id> --since 7d                 STORED comments: what the
+                                                  argument actually says
     al0g fetch    <id> --diff                      live PR diff
-    al0g fetch    <id> --comments --since 7d       the discussion behind a count
+    al0g fetch    <id> --comments --since 7d       live comments (needs a network)
     al0g sources show coreos                       what is collected, and when
+
+`comments` reads the local store and returns exactly the comments the counts are
+built from — no network, no credentials, bots already excluded. Prefer it.
+`fetch` goes to the live API and is only worth it when the store is behind.
 
 Work entirely through these commands. Do not read `data/` and do not query the
 database directly — the storage layout is an implementation detail.
@@ -66,9 +72,10 @@ Report the last 7 days.
    issues. For anything touching bootupd, bootc, sysext, composefs, Secure Boot
    or the stream pipeline, say what it implies.
 3. **Where the discussion is.** Items with recent comment activity, ranked by
-   comments *in the window*, and what each argument is actually about. Say when
-   a thread is CI or repo plumbing rather than design — it changes how much
-   attention it deserves.
+   comments *in the window*, and what each argument is actually about. **Read
+   the comments** for the threads you rank, rather than inferring the topic from
+   the title — a 27-comment thread is often CI re-triggers, and the bodies are
+   the only way to tell. Say when a thread is plumbing rather than design.
 4. **Releases and streams.** Stream release issues for next, testing and
    stable, with versions and dates, plus any coreos releases.
 5. **Key themes.** Three to five threads of work visible across the week.
