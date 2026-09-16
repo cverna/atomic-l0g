@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -41,8 +42,11 @@ except ModuleNotFoundError as exc:  # pragma: no cover - install guidance
     ) from exc
 
 from atomic_l0g import __version__
+from atomic_l0g.registry import load_registry
 
 __all__ = ["build_server", "main"]
+
+log = logging.getLogger("atomic_l0g.mcp")
 
 #: Invoke the CLI as a module rather than a console script so the server does
 #: not depend on PATH inside a container.
@@ -62,14 +66,10 @@ READ_ONLY = ToolAnnotations(
     read_only_hint=True, idempotent_hint=True, open_world_hint=False
 )
 
-INSTRUCTIONS = """\
+INSTRUCTIONS_BODY = """\
 atomic-l0g consolidates the image-based Linux ecosystem -- competitor distros
 plus the CoreOS baseline -- into a local store. The data is already collected;
 these tools answer questions about it.
-
-Coverage: 39 GitHub repositories and 6 blog feeds across 14 registered
-projects. Activity covers roughly the last 7-14 days; releases reach back about
-200 per repository.
 
 Before concluding that a project is quiet, check ecosystem_sources. A
 repository that has never been collected looks identical to an idle one in
@@ -89,6 +89,29 @@ Known gaps -- state these rather than paper over them:
   - openshift/os tracks most work in Jira, so a quiet issue feed there is
     expected.
 """
+
+
+def _instructions() -> str:
+    """Coverage line computed from the registry, plus the fixed caveats.
+
+    The counts used to be written into the text by hand, and a deployment
+    promptly reported "39 GitHub repositories ... across 14 registered
+    projects" long after it was 43 and 17. A number that has to be maintained
+    by hand will be wrong again, so derive it.
+    """
+    try:
+        registry = load_registry(None)
+    except (FileNotFoundError, ValueError) as exc:
+        log.warning("cannot read the registry for the coverage line: %s", exc)
+        return INSTRUCTIONS_BODY
+
+    feeds = sum(len(project.feeds) for project in registry.projects.values())
+    covered = sum(1 for repo in registry.repo_tiers if "/" in repo)
+    coverage = (
+        f"Coverage: {len(registry.projects)} projects, {covered} repositories, "
+        f"{feeds} feeds."
+    )
+    return coverage + "\n\n" + INSTRUCTIONS_BODY
 
 def _clamp(value: int, maximum: int) -> int:
     return max(1, min(int(value), maximum))
@@ -158,7 +181,7 @@ def build_server() -> MCPServer:
         name="atomic-l0g",
         title="Image-mode Linux ecosystem",
         version=__version__,
-        instructions=INSTRUCTIONS,
+        instructions=_instructions(),
     )
 
     @server.custom_route("/healthz", methods=["GET"])

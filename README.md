@@ -132,6 +132,14 @@ settings are overridable with an `ATOMIC_L0G_` prefix, e.g. `ATOMIC_L0G_DATA_DIR
 ```
 sources/    declarative registry: projects, repos, tiers, bots, themes
 src/        package code
-data/       collected JSONL + cursors (committed); SQLite (derived, ignored)
-reports/    generated digests
+data/       collected JSONL + cursors; SQLite index is derived and ignored
+prompts/    task prompts for agents; also the interface specification
+scripts/    daily-ingest.sh -- what the timer or CronJob runs
+deploy/     systemd units and the single-VM deployment guide
 ```
+
+## Deployment
+
+One host runs a timer that collects and a service that serves MCP over HTTP,
+with a deliberate split: the collecting process holds the GitHub token, the
+network-facing one holds nothing. See [deploy/README.md](deploy/README.md).

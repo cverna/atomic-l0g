@@ -1,0 +1,19 @@
+[Unit]
+Description=atomic-l0g daily ingest
+Documentation=file:/opt/atomic-l0g/deploy/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=atomic-l0g
+Group=atomic-l0g
+
+# The leading "-" makes the file optional. A missing token then surfaces as the
+# CLI's own clear message ("mount it at ... or set GITHUB_TOKEN") with a
+# non-zero exit, rather than as an opaque systemd failure.
+EnvironmentFile=-/etc/atomic-l0g/env
+
+Environment=ATOMIC_L0G_DATA_DIR=/var/lib/atomic-l0g
+
+ExecStart=/opt/atomic-l0g/scripts/daily-ingest.sh

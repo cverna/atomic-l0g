@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the atomic-l0g ingest daily
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+
+# Catch up after downtime instead of skipping. The whole point of a daily
+# ingest is that the store does not silently develop a gap, and a VM that was
+# rebooting at 06:00 is exactly when you would get one.
+Persistent=true
+
+# Spread the API calls a little; harmless here, useful if this ever runs on
+# more than one host.
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

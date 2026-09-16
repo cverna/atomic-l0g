@@ -176,11 +176,13 @@ def _human(size: int) -> str:
 
 def _render_sizes(settings: Settings) -> None:
     """Make store growth visible on every run, before it becomes a problem."""
-    store = _dir_size(settings.normalized_dir)
-    git = _dir_size(repo_root() / ".git")
-    typer.secho(
-        f"store: {_human(store)} jsonl | .git {_human(git)}", fg=typer.colors.BLUE
-    )
+    parts = [f"store: {_human(_dir_size(settings.normalized_dir))} jsonl"]
+    # .git may legitimately be absent -- a deployment that copied the tree
+    # without it, for instance. Reporting "0.0 B" there is just noise.
+    git_dir = repo_root() / ".git"
+    if git_dir.is_dir():
+        parts.append(f".git {_human(_dir_size(git_dir))}")
+    typer.secho(" | ".join(parts), fg=typer.colors.BLUE)
 
 
 @app.command()
@@ -461,7 +463,10 @@ def sync(
 
     _render_sizes(settings)
 
-    if report.errors:
+    if report.errors or report.missing_secrets:
+        # A missing secret is a failure, not a warning: every GitHub target was
+        # skipped, nothing was collected, and an unattended timer would report
+        # success while quietly going stale.
         raise typer.Exit(code=1)
 
 
