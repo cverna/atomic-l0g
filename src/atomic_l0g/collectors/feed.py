@@ -100,13 +100,15 @@ def _labels(entry: Any) -> list[str]:
     ]
 
 
-def _item(project: str, label: str, entry: Any, observed: str) -> Item:
+def _item(
+    project: str, label: str, entry: Any, observed: str, kind: str, key: str
+) -> Item:
     published = _timestamp(entry, "published", "updated")
     return Item(
-        id=f"feed:{project}:{label}:{_entry_key(entry)}",
+        id=f"feed:{project}:{label}:{key}",
         distro=project,
         provider="feed",
-        item_kind="blog",
+        item_kind=kind,
         title=entry.get("title") or None,
         summary=_plain(entry.get("summary")),
         body=_body(entry),
@@ -126,6 +128,7 @@ def collect_feed(
     url: str,
     cursor: Cursor,
     observed: str,
+    kind: str = "blog",
 ) -> SyncResult:
     """Read one feed.  Raises on transport errors; the caller isolates."""
     result = SyncResult(provider="feed", target=f"{project.name}:{label}")
@@ -143,17 +146,35 @@ def collect_feed(
         result.notes.append(f"feed did not parse: {parsed.get('bozo_exception')}")
         return result
 
-    newest: str | None = cursor.get("last_published")
+    # Collapse repeated ids before emitting. Archives legitimately repeat a
+    # message -- lore.kernel.org serves the same kernel patch once per mailing
+    # list it was sent to, all under one Atom id but with differently rendered
+    # bodies. Emitting every copy makes the store append a "revision" on every
+    # sync forever, because the two variants never settle on one hash. Keeping
+    # the first occurrence is arbitrary but deterministic, which is what
+    # idempotency requires.
+    unique: dict[str, Any] = {}
     for entry in parsed.entries:
-        item = _item(project.name, label, entry, observed)
+        unique.setdefault(_entry_key(entry), entry)
+
+    newest: str | None = cursor.get("last_published")
+    for key, entry in unique.items():
+        item = _item(project.name, label, entry, observed, kind, key)
         result.items.append(item)
         if item.created_at and (newest is None or item.created_at > newest):
             newest = item.created_at
+
+    duplicates = len(parsed.entries) - len(unique)
+    if duplicates:
+        log.info(
+            "%s:%s: collapsed %d duplicate entries", project.name, label, duplicates
+        )
 
     # Recorded for observability even though collection is not filtered by it.
     result.cursor["last_published"] = newest
     result.cursor["feed_title"] = parsed.feed.get("title")
     result.cursor["entry_count"] = len(parsed.entries)
+    result.cursor["unique_count"] = len(unique)
 
-    log.debug("%s:%s -> %d entries", project.name, label, len(parsed.entries))
+    log.debug("%s:%s -> %d entries as %s", project.name, label, len(unique), kind)
     return result

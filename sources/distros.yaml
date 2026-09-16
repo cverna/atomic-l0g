@@ -137,6 +137,46 @@ aws-blogs:
     opensource: https://aws.amazon.com/blogs/opensource/feed/
 
 # --------------------------------------------------------------------------
+# The systemd ecosystem
+#
+# Amutable is a company founded by the systemd maintainers plus the founder of
+# Kinvolk (which built Flatcar), working on build/boot/runtime integrity. It
+# publishes no code of its own: the work lands upstream, which is why the
+# project has feeds and no repositories, and why the two projects below matter.
+# --------------------------------------------------------------------------
+
+amutable:
+  vendor: Amutable
+  lineage: [systemd, Kinvolk]
+  update_mechanism: sysupdate
+  feeds:
+    blog: https://amutable.com/rss.xml
+    # lore.kernel.org serves search results as Atom, which is how kernel work
+    # becomes collectable at all -- it has no forge. The From filter is a
+    # substring match, so `f:amutable.com` also catches per-person kernel.org
+    # aliases like devnull+daan.amutable.com@kernel.org. Brauner submits from
+    # brauner@kernel.org, hence the OR.
+    kernel:
+      url: "https://lore.kernel.org/all/?q=f:amutable.com%20OR%20f:brauner@kernel.org&x=A"
+      kind: patch
+
+systemd:
+  vendor: systemd project
+  update_mechanism: sysupdate, systemd-sysupdate
+  repos:
+    github:
+      - systemd/systemd
+      - systemd/mkosi
+
+uapi-group:
+  vendor: UAPI Group
+  lineage: [systemd]
+  repos:
+    github:
+      - uapi-group/specifications
+      - uapi-group/kernel-features
+
+# --------------------------------------------------------------------------
 # BASELINE -- our own projects, kept so competitor data has something to
 # compare against. Remove this block to watch competitors only.
 # --------------------------------------------------------------------------

@@ -40,6 +40,7 @@ ITEM_KINDS = frozenset(
         "mr",
         "release",
         "blog",
+        "patch",
         "changelog-entry",
         "cve",
         "commit",

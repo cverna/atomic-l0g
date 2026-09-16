@@ -47,6 +47,7 @@ class Target:
     key: str  # "owner/repo" for repositories, a feed label for feeds
     tier: str
     url: str | None = None
+    kind: str = "blog"  # item_kind for feed targets
 
 
 @dataclass
@@ -131,8 +132,10 @@ def _targets(
         # Feeds belong to no tier of their own, so they are collected whenever
         # the project is selected and no specific repository tier was asked for.
         if tier is None or tier == FEED_TIER:
-            for label, url in project.feeds.items():
-                targets.append(Target(project.name, "feed", label, FEED_TIER, url))
+            for label, feed in project.feeds.items():
+                targets.append(
+                    Target(project.name, "feed", label, FEED_TIER, feed.url, feed.kind)
+                )
 
     targets.sort(key=lambda target: -_ORDER.get(target.tier, 0))
     return targets
@@ -219,6 +222,7 @@ def sync(
                         target.url or "",
                         cursor,
                         observed,
+                        kind=target.kind,
                     )
                 else:
                     if github is None:

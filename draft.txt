@@ -1,0 +1,75 @@
+Subject: bootc goes multi-vendor, sysext everywhere, and the cost of patch speed
+
+TL;DR
+- bootc crossed a vendor boundary. Azure Linux 4.0 is evaluating an official bootc base image, and Fedora CoreOS/bootc is the de facto reference others measure against.
+- systemd-sysext is now the universal extension model across every project in the field — Flatcar alone shipped 12 extension releases in a week.
+- UKI + Secure Boot hardening accelerated on three fronts: Bottlerocket, Azure Linux, and our own bootupd 0.3.2.
+- The Fedora 45 transition is a real capacity tax this cycle; we deliberately deferred systemd-oomd + zram to F46 to absorb it.
+- Patch automation is now the dominant activity at Azure Linux, while Flatcar's fast major-version jump shows the regression cost that speed buys.
+
+1. bootc crosses the vendor boundary
+The most strategically significant thread of the week: Azure Linux 4.0 has an open request for an official bootc base image (bootable container, atomic updates from an OCI registry) [1]. Microsoft's public response was deliberate and non-committal — "a valuable feature request… we're not making any commitment."
+
+They're also actively consuming our stack: Azure Linux is pinning rpm-ostree to pick up a fix for a silent upgrade no-op on bootc hosts [2]. CoreOS, meanwhile, merged test changes to accommodate disks created by `bootc install` now shipping an `aleph` file [3].
+
+Why it matters: Fedora/CentOS bootc images are becoming the reference implementation competitors test against — but they're also finding our bugs first. That cuts both ways.
+
+2. sysext is now table stakes, not a differentiator
+Every project in the field converged on "extend the immutable OS, don't rebuild it":
+- Flatcar shipped 12 sysext-bakery releases in seven days (k3s, RKE2, CRI-O, Docker 29.8.1, ollama, wasmtime, plus a new node-exporter extension) — and ate an acute regression when the sysext /opt overlay broke k0s paths [4].
+- Kairos is building declarative extension catalogs with OCI/HTTP/file sources [5].
+- RHCOS re-enabled the sandboxed-containers extension for OCP 5.0 — a kata-containers blocker that took a two-week CI fight over kernel-rt packaging and 5.1 repo branching [6].
+
+Why it matters: the mechanism is commoditized. The differentiator is now the distribution and curation of extensions — which is where our ecosystem play should be framed.
+
+3. UKI & Secure Boot is the active hardening front
+- Bottlerocket/Twoliter is working to boot UKI directly, updating PCR calculations for UKI layouts and adding keys for local UKI signing [7].
+- Azure Linux reapplied shim v16.1 with dual signatures.
+- bootupd v0.3.2 (ours) added Secure Boot db certificate validation before update, a BIOS fix, and CentOS 10 CI coverage [8].
+
+Why it matters: measured boot and signed supply chain is the competitive hardening axis this quarter. bootupd is our lever — and it's getting upstream CI investment now.
+
+4. Fedora 45 transition is consuming release-engineering capacity
+CoreOS `next` moved to Fedora 45 (45.20260913.1.1) with the F45 beta GO approved Sep 15 [9]; stable is 44.20260829.3.1 and testing is 44.20260913.2.1. As a direct consequence, systemd-oomd + zram was explicitly deferred to F46 [10], libselinux is pinned across `next`/`rawhide`, and fast-track downgrade lists are being curated.
+
+Why it matters: a Fedora major cycle is a predictable, repeatable capacity tax each release. Worth naming explicitly in planning so it stops arriving as a surprise.
+
+5. Patch velocity vs. upgrade-regression risk
+Azure Linux's 123 comments this week are overwhelmingly automated CVE patch PRs — a CVE-2026-84304 batch touching ~20 packages, plus nginx, util-linux, libsoup, pcre2 and more [11]. That volume is the story to watch: a single upstream library issue fanning out across an entire distro.
+
+Flatcar shows the other side of that coin. Its stable 4757.2.0 jumped systemd 257→260 and moved /etc to a systemd-confext [12]. It fixed the sysext bug but users hit Docker/nftables module-loading failures and an RKE2 boot regression, with a separate Podman rootless UID/GID bug still open [13].
+
+Why it matters: competitors are buying speed with major-version leaps, and the regressions land on their users. Our conservative, staged rollout and Cincinnati update graph is a differentiation point we should market, not downplay.
+
+Shipped this week (CoreOS / RHCOS)
+- Fedora CoreOS 45.20260913.1.1 (next) [9], 44.20260829.3.1 (stable), 44.20260913.2.1 (testing)
+- coreos/bootupd v0.3.2 released [8]
+- RHCOS: openshift/os now tracks 5.1 [14]; sandboxed-containers extension re-enabled for 5.0 [6]
+
+Watch list
+- Will Microsoft commit to an Azure Linux bootc base image, or keep evaluating? [1]
+- Fedora 45 rollout to stable, and whether oomd/zram lands in F46 [10].
+- The CVE-2026-84304 batch — likely one upstream library issue worth tracking centrally [11].
+- Flatcar's RKE2 boot regression follow-up (a new issue is expected).
+
+Method & caveats
+Window: Sep 9–16, 2026, across 13 projects / 39 repos / 6 feeds.
+- Comment counts are collected only for core-tier projects (CoreOS, RHCOS, Flatcar, Bottlerocket, Azure Linux, Amazon Linux). Kairos and Talos show zero comments because they aren't collected — not because they're quiet.
+- fedora/bootc is not collected (GitLab gap), notable given it is the subject of Theme 1.
+- openshift/os tracks most work in Jira, so its quiet issue feed is expected.
+
+Links
+[1] - https://github.com/microsoft/azurelinux/issues/18817
+[2] - https://github.com/microsoft/azurelinux/issues/18802
+[3] - https://github.com/coreos/fedora-coreos-config/pull/4261
+[4] - https://github.com/flatcar/Flatcar/issues/2111
+[5] - https://github.com/kairos-io/kairos/pull/4487
+[6] - https://github.com/openshift/os/pull/1965
+[7] - https://github.com/bottlerocket-os/twoliter/pull/742
+[8] - https://github.com/coreos/bootupd/releases/tag/v0.3.2
+[9] - https://github.com/coreos/fedora-coreos-streams/issues/1300
+[10] - https://github.com/coreos/fedora-coreos-config/pull/4356
+[11] - https://github.com/microsoft/azurelinux/pull/18811
+[12] - https://github.com/flatcar/scripts/releases/tag/stable-4757.2.0
+[13] - https://github.com/flatcar/Flatcar/issues/2423
+[14] - https://github.com/openshift/os/pull/1964

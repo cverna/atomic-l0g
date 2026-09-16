@@ -295,10 +295,11 @@ def sources_show(
         "feeds": [
             {
                 "label": label,
-                "url": url,
+                "url": feed.url,
+                "kind": feed.kind,
                 "last_collected": last_collected("feed", f"{project}:{label}"),
             }
-            for label, url in entry.feeds.items()
+            for label, feed in entry.feeds.items()
         ],
         "release_endpoints": [
             {"type": endpoint.type, "url": endpoint.url}
@@ -330,10 +331,11 @@ def sources_show(
 
     if payload["feeds"]:
         typer.echo()
-        typer.secho(f"  {'FEED':<18} LAST COLLECTED", bold=True)
+        typer.secho(f"  {'FEED':<14} {'KIND':<8} LAST COLLECTED", bold=True)
         for row in payload["feeds"]:
             typer.echo(
-                f"  {row['label']:<18} {row['last_collected'] or 'never':<22} {row['url']}"
+                f"  {row['label']:<14} {row['kind']:<8} "
+                f"{row['last_collected'] or 'never':<22} {row['url'][:56]}"
             )
 
     if payload["release_endpoints"]:

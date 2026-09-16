@@ -24,6 +24,10 @@ tiers:
     - coreos/fedora-coreos-config
     - coreos/fedora-coreos-streams
     - openshift/os
+    # Small repos, high signal: mkosi builds the images, and the UAPI specs are
+    # where boot/partition/UKI behaviour is actually decided.
+    - systemd/mkosi
+    - uapi-group/specifications
 
   watch:
     - flatcar/nebraska
@@ -45,6 +49,10 @@ tiers:
     - bottlerocket-os/twoliter
     - fedora/bootc/base-images
     - fedora/bootc/docs
+    # 170 items a week, mostly not image-mode. Titles only: enough to spot
+    # sysupdate/UKI/portable/mkosi work without the comment volume.
+    - systemd/systemd
+    - uapi-group/kernel-features
 
   release-only:
     - ublue-os/bluefin

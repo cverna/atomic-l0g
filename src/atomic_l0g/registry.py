@@ -17,9 +17,12 @@ from typing import Any
 
 import yaml
 
+from atomic_l0g.model import ITEM_KINDS
+
 __all__ = [
     "PROVIDERS",
     "REPO_TIERS",
+    "Feed",
     "Project",
     "Registry",
     "ReleaseEndpoint",
@@ -48,6 +51,20 @@ class ReleaseEndpoint:
 
 
 @dataclass
+class Feed:
+    """An RSS/Atom source.
+
+    ``kind`` is the ``item_kind`` its entries become.  Most feeds are blog
+    posts, but a mailing-list archive is not:  lore.kernel.org serves kernel
+    patches as Atom, and filing those under ``blog`` would put them in every
+    ``--kind blog`` query.
+    """
+
+    url: str
+    kind: str = "blog"
+
+
+@dataclass
 class Project:
     """One upstream project in the registry."""
 
@@ -56,7 +73,7 @@ class Project:
     lineage: list[str] = field(default_factory=list)
     update_mechanism: str | None = None
     repos: dict[str, list[str]] = field(default_factory=dict)
-    feeds: dict[str, str] = field(default_factory=dict)
+    feeds: dict[str, Feed] = field(default_factory=dict)
     release_endpoints: list[ReleaseEndpoint] = field(default_factory=list)
 
     def repositories(self) -> list[tuple[str, str]]:
@@ -98,6 +115,19 @@ def _read_yaml(path: Path) -> Any:
         return None
     with path.open("rb") as handle:
         return yaml.safe_load(handle)
+
+
+def _parse_feed(value: Any) -> Feed:
+    """Accept either ``label: url`` or ``label: {url: ..., kind: ...}``.
+
+    The bare-string form is kept so existing registries do not need touching.
+    """
+    if isinstance(value, dict):
+        return Feed(
+            url=str(value.get("url") or ""),
+            kind=str(value.get("kind") or "blog"),
+        )
+    return Feed(url=str(value or ""))
 
 
 def _load_tiers(path: Path) -> dict[str, str]:
@@ -144,8 +174,8 @@ def load_registry(sources: Path | None = None) -> Registry:
                 for provider, repos in (body.get("repos") or {}).items()
             },
             feeds={
-                str(label): str(url)
-                for label, url in (body.get("feeds") or {}).items()
+                str(label): _parse_feed(value)
+                for label, value in (body.get("feeds") or {}).items()
             },
             release_endpoints=[
                 ReleaseEndpoint(type=str(item.get("type", "")), url=str(item.get("url", "")))
@@ -213,9 +243,14 @@ def validate_registry(registry: Registry) -> list[str]:
                 if repo not in registry.repo_tiers:
                     problems.append(f"{name}: repository {repo!r} has no tier in repos.yaml")
 
-        for label, url in project.feeds.items():
-            if not url.startswith(("http://", "https://")):
+        for label, feed in project.feeds.items():
+            if not feed.url.startswith(("http://", "https://")):
                 problems.append(f"{name}: feed {label!r} is not an http(s) URL")
+            if feed.kind not in ITEM_KINDS:
+                problems.append(
+                    f"{name}: feed {label!r} has unknown kind {feed.kind!r} "
+                    f"(expected one of {', '.join(sorted(ITEM_KINDS))})"
+                )
 
         for endpoint in project.release_endpoints:
             if not endpoint.type:
