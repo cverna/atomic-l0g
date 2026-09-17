@@ -23,11 +23,16 @@ tiers:
     - coreos/coreos-assembler
     - coreos/fedora-coreos-config
     - coreos/fedora-coreos-streams
+    - coreos/rhel-coreos-config
     - openshift/os
     # Small repos, high signal: mkosi builds the images, and the UAPI specs are
     # where boot/partition/UKI behaviour is actually decided.
     - systemd/mkosi
     - uapi-group/specifications
+    - bootc-dev/bootc
+    - bootc-dev/bootc-operator
+    - coreos/chunkah
+    - coreos/bootupd
 
   watch:
     - flatcar/nebraska
@@ -44,8 +49,6 @@ tiers:
     - coreos/butane
     - coreos/afterburn
     - coreos/zincati
-    - coreos/chunkah
-    - coreos/bootupd
     - bottlerocket-os/twoliter
     - fedora/bootc/base-images
     - fedora/bootc/docs

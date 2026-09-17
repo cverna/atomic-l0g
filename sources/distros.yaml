@@ -201,6 +201,7 @@ coreos:
       - coreos/coreos-assembler
       - coreos/fedora-coreos-config
       - coreos/fedora-coreos-streams
+      - coreos/rhel-coreos-config
       - coreos/ignition
       - coreos/butane
       - coreos/afterburn
@@ -219,6 +220,9 @@ bootc:
   vendor: Red Hat
   update_mechanism: bootc
   repos:
+    github:
+      - bootc-dev/bootc
+      - bootc-dev/bootc-operator
     gitlab:
       - fedora/bootc/base-images
       - fedora/bootc/docs
