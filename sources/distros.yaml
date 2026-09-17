@@ -72,9 +72,20 @@ amazon-linux:
   update_mechanism: dnf
   repos:
     github:
+      # 2023/2027 are release notes + the public issue tracker -- where distro
+      # feedback and bug reports land -- not where code is written. container-
+      # images is an artifact store. The actual Amazon Linux engineering lives
+      # in the small OS-side repos below.
       - amazonlinux/amazon-linux-2023
       - amazonlinux/amazon-linux-2027
       - amazonlinux/container-images
+      - amazonlinux/amazon-ec2-utils
+      - amazonlinux/amazon-ec2-net-utils
+      - amazonlinux/dnf-plugin-support-info
+      - amazonlinux/smart-restart
+      - amazonlinux/update-motd
+      - amazonlinux/amazon-linux-supportinfo
+      - amazonlinux/kiwi-image-descriptions-examples
   release_endpoints:
     - type: amazonlinux-release-notes
       url: https://docs.aws.amazon.com/linux/al2023/release-notes/relnotes.html

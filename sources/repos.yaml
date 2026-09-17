@@ -53,6 +53,17 @@ tiers:
     # sysupdate/UKI/portable/mkosi work without the comment volume.
     - systemd/systemd
     - uapi-group/kernel-features
+    # Amazon Linux keeps code out of its tracker repos; this is where the
+    # distro actually lands. Small, low-volume repos: issue/PR metadata only.
+    # The kernel fork (amazonlinux/linux) is deliberately absent -- the model
+    # has no commit/branch collector, so it would yield nothing.
+    - amazonlinux/amazon-ec2-utils
+    - amazonlinux/amazon-ec2-net-utils
+    - amazonlinux/dnf-plugin-support-info
+    - amazonlinux/smart-restart
+    - amazonlinux/update-motd
+    - amazonlinux/amazon-linux-supportinfo
+    - amazonlinux/kiwi-image-descriptions-examples
 
   release-only:
     - ublue-os/bluefin
