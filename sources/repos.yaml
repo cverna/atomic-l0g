@@ -33,6 +33,9 @@ tiers:
     - bootc-dev/bootc-operator
     - coreos/chunkah
     - coreos/bootupd
+    # Small repos, high signal: Fedora's default OCI runtime, where the wasm
+    # and VM-runtime extension work lands.
+    - containers/crun
 
   watch:
     - flatcar/nebraska
@@ -67,6 +70,37 @@ tiers:
     - amazonlinux/update-motd
     - amazonlinux/amazon-linux-supportinfo
     - amazonlinux/kiwi-image-descriptions-examples
+    # --- container & OCI ecosystem: image/FS layer ---
+    # Not core: watch collects releases plus issue/PR metadata, which is
+    # enough to see movement without spending the comment budget.
+    - composefs/composefs
+    - ostreedev/ostree
+    - coreos/rpm-ostree
+    - osbuild/osbuild
+    - osbuild/image-builder
+    - flightctl/flightctl
+    # --- container tools and engines ---
+    - podman-container-tools/podman
+    - podman-container-tools/buildah
+    - podman-container-tools/skopeo
+    - containers/toolbox
+    - containers/container-selinux
+    - cri-o/cri-o
+    - containerd/containerd
+    - moby/buildkit
+    # --- OCI specification: spec issues are the product ---
+    - opencontainers/runtime-spec
+    - opencontainers/image-spec
+    - opencontainers/distribution-spec
+    - opencontainers/runc
+    # --- registries and signing ---
+    - distribution/distribution
+    - project-zot/zot
+    - oras-project/oras
+    - sigstore/cosign
+    - wolfi-dev/os
+    - wolfi-dev/wolfictl
+    - confidential-containers/confidential-containers
 
   release-only:
     - ublue-os/bluefin
@@ -80,3 +114,42 @@ tiers:
     - bottlerocket-os/bottlerocket-project-website
     - amazonlinux/container-images
     - microsoft/AzureLinuxVulnerabilityData
+    # --- container & OCI ecosystem: support libraries and satellites ---
+    # Releases and tags only. The giants (moby/moby, docker/cli,
+    # kubernetes/kubernetes) live here too: thousands of open issues each,
+    # so a release timeline is the useful signal, not the discussion.
+    - containers/common
+    - containers/image
+    - containers/storage
+    - containers/netavark
+    - containers/aardvark-dns
+    - containers/conmon
+    - containers/fuse-overlayfs
+    - containers/shortnames
+    - containers/udica
+    - containers/bubblewrap
+    - podman-desktop/podman-desktop
+    - opencontainers/runtime-tools
+    - opencontainers/umoci
+    - opencontainers/oci-conformance
+    - containerd/nerdctl
+    - moby/moby
+    - docker/cli
+    - docker/buildx
+    - kubernetes/kubernetes
+    - sigstore/rekor
+    - sigstore/fulcio
+    - sigstore/sigstore
+    - in-toto/in-toto
+    - notaryproject/notary
+    - buildpacks/pack
+    - buildpacks/lifecycle
+    - ko-build/ko
+    - google/go-containerregistry
+    - GoogleContainerTools/distroless
+    - wolfi-dev/secdb
+    - chainguard-images/images
+    - google/gvisor
+    - kata-containers/kata-containers
+    - confidential-containers/attestation-agent
+    - confidential-containers/guest-components

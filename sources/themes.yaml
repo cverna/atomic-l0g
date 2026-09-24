@@ -67,6 +67,26 @@ themes:
     - '\bgrub\b'
     - 'uki'
 
+  oci:
+    - '\bOCI\b'
+    - 'oci image'
+    - 'oci runtime'
+    - 'oci distribution'
+
+  rootless:
+    - 'rootless'
+
+  registry:
+    - '\bregistry\b'
+    - 'container registry'
+    - 'image registry'
+
+  image-builder:
+    - 'image builder'
+    - '\bosbuild\b'
+    - '\bbuildah\b'
+    - 'buildkit'
+
 # Labels that mark an item as security-relevant. Feeds `signal.is_security`.
 security_labels:
   - 'kind/security'

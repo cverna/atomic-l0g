@@ -188,6 +188,292 @@ uapi-group:
       - uapi-group/kernel-features
 
 # --------------------------------------------------------------------------
+# The container & OCI ecosystem
+#
+# The image and OCI layer the image-mode distros are built on: filesystem
+# and image compositing, container tools, engines, OCI specifications,
+# builders, registries and signing.
+#
+# Repo names verified 2026-09-24 -- several projects have moved:
+#   containers/{podman,buildah,skopeo} -> podman-container-tools/*
+#   containers/podman-desktop          -> podman-desktop/podman-desktop
+#   osbuild/images                     -> osbuild/image-builder
+#   orasproject/oras                   -> oras-project/oras
+#   theupdateframework/notary          -> notaryproject/notary
+#   wolfi (repo)                       -> wolfi-dev/os
+#
+# flightctl's advertised blog feed (flightctl.io/blog/rss.xml) is deliberately
+# not registered: it holds one 2021 placeholder post, which would inject a
+# stale fake item on every run.
+# --------------------------------------------------------------------------
+
+# --- image/FS layer: the bridge from containers to image mode ---
+
+composefs:
+  vendor: composefs project
+  lineage: [ostree]
+  repos:
+    github:
+      - composefs/composefs
+
+ostree:
+  vendor: OSTree project
+  repos:
+    github:
+      - ostreedev/ostree
+
+rpm-ostree:
+  vendor: Red Hat
+  lineage: [ostree, CoreOS Container Linux]
+  update_mechanism: rpm-ostree
+  repos:
+    github:
+      - coreos/rpm-ostree
+
+osbuild:
+  vendor: Red Hat
+  repos:
+    github:
+      - osbuild/osbuild
+      - osbuild/image-builder
+
+flightctl:
+  vendor: flightctl project
+  repos:
+    github:
+      - flightctl/flightctl
+
+# --- container tools (the Fedora/Podman stack) ---
+
+podman:
+  vendor: Podman project
+  repos:
+    github:
+      - podman-container-tools/podman
+  feeds:
+    blog: https://blog.podman.io/feed/
+
+buildah:
+  vendor: Podman project
+  repos:
+    github:
+      - podman-container-tools/buildah
+
+skopeo:
+  vendor: Podman project
+  repos:
+    github:
+      - podman-container-tools/skopeo
+
+crun:
+  vendor: containers project
+  repos:
+    github:
+      - containers/crun
+
+container-libs:
+  vendor: containers project
+  repos:
+    github:
+      - containers/common
+      - containers/image
+      - containers/storage
+
+container-network:
+  vendor: containers project
+  repos:
+    github:
+      - containers/netavark
+      - containers/aardvark-dns
+      - containers/conmon
+      - containers/fuse-overlayfs
+      - containers/shortnames
+
+toolbox:
+  vendor: containers project
+  repos:
+    github:
+      - containers/toolbox
+
+container-selinux:
+  vendor: containers project
+  repos:
+    github:
+      - containers/container-selinux
+      - containers/udica
+
+bubblewrap:
+  vendor: containers project
+  repos:
+    github:
+      - containers/bubblewrap
+
+podman-desktop:
+  vendor: Red Hat
+  repos:
+    github:
+      - podman-desktop/podman-desktop
+
+# --- engines and cluster runtimes ---
+
+cri-o:
+  vendor: CRI-O project
+  repos:
+    github:
+      - cri-o/cri-o
+
+containerd:
+  vendor: containerd project
+  repos:
+    github:
+      - containerd/containerd
+      - containerd/nerdctl
+
+moby:
+  vendor: Docker Inc.
+  repos:
+    github:
+      - moby/moby
+      - moby/buildkit
+
+docker-cli:
+  vendor: Docker Inc.
+  repos:
+    github:
+      - docker/cli
+      - docker/buildx
+
+kubernetes:
+  vendor: Kubernetes project
+  repos:
+    github:
+      - kubernetes/kubernetes
+  feeds:
+    blog: https://kubernetes.io/feed.xml
+
+# --- the OCI specification ---
+
+opencontainers:
+  vendor: Open Container Initiative
+  repos:
+    github:
+      - opencontainers/runtime-spec
+      - opencontainers/image-spec
+      - opencontainers/distribution-spec
+      - opencontainers/runc
+      - opencontainers/runtime-tools
+      - opencontainers/umoci
+      - opencontainers/oci-conformance
+
+# --- registries and distribution ---
+
+distribution:
+  vendor: distribution project
+  repos:
+    github:
+      - distribution/distribution
+
+zot:
+  vendor: Project Zot
+  repos:
+    github:
+      - project-zot/zot
+
+oras:
+  vendor: ORAS project (CNCF)
+  repos:
+    github:
+      - oras-project/oras
+
+notary:
+  vendor: Notary Project (CNCF)
+  repos:
+    github:
+      - notaryproject/notary
+
+# --- supply chain and signing ---
+
+sigstore:
+  vendor: Sigstore project (OpenSSF)
+  repos:
+    github:
+      - sigstore/cosign
+      - sigstore/rekor
+      - sigstore/fulcio
+      - sigstore/sigstore
+  feeds:
+    blog: https://www.sigstore.dev/rss/
+
+in-toto:
+  vendor: in-toto project
+  repos:
+    github:
+      - in-toto/in-toto
+
+confidential-containers:
+  vendor: Confidential Containers project (CNCF)
+  repos:
+    github:
+      - confidential-containers/confidential-containers
+      - confidential-containers/attestation-agent
+      - confidential-containers/guest-components
+
+# --- build pipelines and base images ---
+
+buildpacks:
+  vendor: Buildpacks project (CNCF)
+  repos:
+    github:
+      - buildpacks/pack
+      - buildpacks/lifecycle
+
+ko:
+  vendor: ko project
+  repos:
+    github:
+      - ko-build/ko
+
+go-containerregistry:
+  vendor: Google
+  repos:
+    github:
+      - google/go-containerregistry
+
+distroless:
+  vendor: Google
+  repos:
+    github:
+      - GoogleContainerTools/distroless
+
+wolfi:
+  vendor: Chainguard
+  repos:
+    github:
+      - wolfi-dev/os
+      - wolfi-dev/wolfictl
+      - wolfi-dev/secdb
+
+chainguard-images:
+  vendor: Chainguard
+  repos:
+    github:
+      - chainguard-images/images
+
+# --- sandboxed runtimes ---
+
+gvisor:
+  vendor: Google
+  repos:
+    github:
+      - google/gvisor
+
+kata-containers:
+  vendor: Kata Containers (CNCF)
+  repos:
+    github:
+      - kata-containers/kata-containers
+
+# --------------------------------------------------------------------------
 # BASELINE -- our own projects, kept so competitor data has something to
 # compare against. Remove this block to watch competitors only.
 # --------------------------------------------------------------------------
