@@ -115,10 +115,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now atomic-l0g-ingest.timer atomic-l0g-mcp.service
 ```
 
-**Edit `atomic-l0g-mcp.service` first if your address differs.** It sets
-`ATOMIC_L0G_ALLOWED_HOSTS` to the public IP and DNS name; that list is
-exact-match or `host:*`, there is no wildcard, and a request whose `Host`
-header is not in it is rejected with **421** and no explanation.
+**Edit `atomic-l0g-mcp.service` before exposing it.** `ATOMIC_L0G_ALLOWED_HOSTS`
+ships unset, so the server accepts localhost only and fails closed — any other
+`Host` header is rejected with **421** and no explanation. Set it to the
+address clients actually use; the list is exact-match or `host:*`, there is no
+wildcard.
 
 ## 7. Firewall
 
